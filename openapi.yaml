@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: ELS Feedback Proxy API
+  version: 1.0.0
+servers:
+  - url: https://feedback.els.ericterminal.com
+paths:
+  /v1/healthz:
+    get:
+      summary: 健康检查
+      responses:
+        '200':
+          description: ok
+  /v1/feedback/challenge:
+    post:
+      summary: 获取 challenge
+      responses:
+        '200':
+          description: challenge 已生成
+  /v1/feedback/issues:
+    post:
+      summary: 创建反馈工单
+      parameters:
+        - in: header
+          name: X-ELS-Challenge-Id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Timestamp
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Signature
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 创建成功
+        '401':
+          description: 签名或 challenge 校验失败
+        '429':
+          description: 触发限流
+  /v1/feedback/issues/{issue_number}:
+    get:
+      summary: 查询反馈工单状态
+      parameters:
+        - in: path
+          name: issue_number
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: ticket_token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 查询成功
+        '403':
+          description: ticket_token 无效

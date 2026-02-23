@@ -1,0 +1,12 @@
+# 二进制与构建产物
+bin/
+dist/
+*.out
+
+# 本地环境与数据
+.env
+.env.local
+data/
+
+# 系统文件
+.DS_Store
