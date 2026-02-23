@@ -73,7 +73,9 @@ func renderIssueBody(req SubmitIssueRequest, clientIPHash string) string {
 	builder.WriteString("\n")
 
 	builder.WriteString("## 服务端附注\n")
-	builder.WriteString(fmt.Sprintf("- 来源: source/app-feedback\n- 客户端IP哈希: %s\n", clientIPHash))
+	builder.WriteString("- 来源: source/app-feedback\n")
+	builder.WriteString("- 同步标记: 由用户提出自动更新的\n")
+	builder.WriteString(fmt.Sprintf("- 客户端IP哈希: %s\n", clientIPHash))
 
 	return builder.String()
 }

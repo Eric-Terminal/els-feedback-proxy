@@ -322,6 +322,10 @@ func filterVisibleLabels(labels []string) []string {
 }
 
 func mapIssueStatus(state string, labels []string) string {
+	if strings.EqualFold(state, "closed") {
+		return "closed"
+	}
+
 	lowered := make([]string, 0, len(labels))
 	for _, label := range labels {
 		lowered = append(lowered, strings.ToLower(label))
@@ -340,9 +344,6 @@ func mapIssueStatus(state string, labels []string) string {
 		return "resolved"
 	}
 
-	if strings.EqualFold(state, "closed") {
-		return "closed"
-	}
 	return "in_progress"
 }
 
