@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -140,7 +141,7 @@ func (s *Server) handleCreateIssue(c *gin.Context) {
 	}
 
 	var req SubmitIssueRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(c, http.StatusBadRequest, "请求体格式无效")
 		return
 	}
