@@ -20,6 +20,8 @@ var (
 	ErrChallengeUsed       = errors.New("challenge 已使用")
 	ErrSignatureInvalid    = errors.New("签名无效")
 	ErrTimestampInvalid    = errors.New("时间戳无效")
+	ErrPoWMissing          = errors.New("缺少 PoW nonce")
+	ErrPoWInvalid          = errors.New("PoW 校验失败")
 	ErrClientBlocked       = errors.New("客户端暂时封禁")
 	ErrChallengeIPMismatch = errors.New("challenge IP 不匹配")
 )
@@ -29,6 +31,8 @@ type ChallengeBundle struct {
 	ChallengeID  string    `json:"challenge_id"`
 	ClientSecret string    `json:"client_secret"`
 	Nonce        string    `json:"nonce"`
+	PoWBits      int       `json:"pow_bits"`
+	PoWSalt      string    `json:"pow_salt"`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
@@ -61,7 +65,7 @@ func NewChallengeManager(ttl, timestampSkew time.Duration, failThreshold int, bl
 	}
 }
 
-func (m *ChallengeManager) Issue(clientIP string) ChallengeBundle {
+func (m *ChallengeManager) Issue(clientIP string, powBits int) ChallengeBundle {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -72,6 +76,8 @@ func (m *ChallengeManager) Issue(clientIP string) ChallengeBundle {
 		ChallengeID:  randomHex(16),
 		ClientSecret: randomHex(32),
 		Nonce:        randomHex(12),
+		PoWBits:      powBits,
+		PoWSalt:      randomHex(8),
 		ExpiresAt:    now.Add(m.ttl),
 	}
 
@@ -88,6 +94,8 @@ func (m *ChallengeManager) VerifySubmission(
 	challengeID string,
 	timestampRaw string,
 	signatureRaw string,
+	powNonceRaw string,
+	powHashRaw string,
 	method string,
 	path string,
 	body []byte,
@@ -136,6 +144,41 @@ func (m *ChallengeManager) VerifySubmission(
 
 	bodyHash := sha256.Sum256(body)
 	bodyHashHex := hex.EncodeToString(bodyHash[:])
+
+	if record.Bundle.PoWBits > 0 {
+		powNonce := strings.TrimSpace(powNonceRaw)
+		if powNonce == "" {
+			m.registerFailure(now, clientIP, challengeID, record)
+			return ErrPoWMissing
+		}
+		if len(powNonce) > 128 {
+			m.registerFailure(now, clientIP, challengeID, record)
+			return ErrPoWInvalid
+		}
+
+		powMessage := buildPoWMessage(
+			method,
+			path,
+			timestampRaw,
+			bodyHashHex,
+			challengeID,
+			record.Bundle.PoWSalt,
+			powNonce,
+		)
+		powDigest := sha256.Sum256([]byte(powMessage))
+		if !hasLeadingZeroBits(powDigest[:], record.Bundle.PoWBits) {
+			m.registerFailure(now, clientIP, challengeID, record)
+			return ErrPoWInvalid
+		}
+		if strings.TrimSpace(powHashRaw) != "" {
+			expectedPowHash := hex.EncodeToString(powDigest[:])
+			if subtle.ConstantTimeCompare([]byte(strings.ToLower(expectedPowHash)), []byte(strings.ToLower(strings.TrimSpace(powHashRaw)))) != 1 {
+				m.registerFailure(now, clientIP, challengeID, record)
+				return ErrPoWInvalid
+			}
+		}
+	}
+
 	signingText := fmt.Sprintf("%s\n%s\n%s\n%s\n%s", strings.ToUpper(method), path, timestampRaw, bodyHashHex, record.Bundle.Nonce)
 
 	mac := hmac.New(sha256.New, []byte(record.Bundle.ClientSecret))
@@ -143,17 +186,55 @@ func (m *ChallengeManager) VerifySubmission(
 	expectedSignature := hex.EncodeToString(mac.Sum(nil))
 
 	if subtle.ConstantTimeCompare([]byte(strings.ToLower(expectedSignature)), []byte(strings.ToLower(signatureRaw))) != 1 {
-		record.FailCount++
-		if record.FailCount >= m.failThreshold {
-			m.blockedClientIP[clientIP] = now.Add(m.blockDuration)
-			delete(m.records, challengeID)
-		}
+		m.registerFailure(now, clientIP, challengeID, record)
 		return ErrSignatureInvalid
 	}
 
 	record.Used = true
 	delete(m.records, challengeID)
 	return nil
+}
+
+func (m *ChallengeManager) registerFailure(now time.Time, clientIP, challengeID string, record *challengeRecord) {
+	record.FailCount++
+	if record.FailCount >= m.failThreshold {
+		m.blockedClientIP[clientIP] = now.Add(m.blockDuration)
+		delete(m.records, challengeID)
+	}
+}
+
+func buildPoWMessage(method, path, timestampRaw, bodyHashHex, challengeID, powSalt, powNonce string) string {
+	return fmt.Sprintf(
+		"%s\n%s\n%s\n%s\n%s\n%s\n%s",
+		strings.ToUpper(method),
+		path,
+		timestampRaw,
+		bodyHashHex,
+		challengeID,
+		powSalt,
+		powNonce,
+	)
+}
+
+func hasLeadingZeroBits(digest []byte, bits int) bool {
+	if bits <= 0 {
+		return true
+	}
+	for _, b := range digest {
+		if bits <= 0 {
+			return true
+		}
+		if bits >= 8 {
+			if b != 0 {
+				return false
+			}
+			bits -= 8
+			continue
+		}
+		mask := byte(0xFF << (8 - bits))
+		return (b & mask) == 0
+	}
+	return bits <= 0
 }
 
 func (m *ChallengeManager) cleanup(now time.Time) {

@@ -27,18 +27,26 @@ import (
 type Server struct {
 	cfg        config.Config
 	gh         *github.Client
-	limiter    *security.FixedWindowLimiter
-	dedupe     *security.DuplicateDetector
+	limiter    rateLimiter
+	dedupe     duplicateDetector
 	challenges *security.ChallengeManager
 	tickets    *store.TicketStore
 	engine     *gin.Engine
 }
 
+type rateLimiter interface {
+	Allow(key string, limit int, window time.Duration) bool
+}
+
+type duplicateDetector interface {
+	SeenRecently(key string, window time.Duration) bool
+}
+
 func NewServer(
 	cfg config.Config,
 	gh *github.Client,
-	limiter *security.FixedWindowLimiter,
-	dedupe *security.DuplicateDetector,
+	limiter rateLimiter,
+	dedupe duplicateDetector,
 	challenges *security.ChallengeManager,
 	tickets *store.TicketStore,
 ) *Server {
@@ -86,12 +94,14 @@ func (s *Server) handleChallenge(c *gin.Context) {
 		return
 	}
 
-	bundle := s.challenges.Issue(clientIP)
+	bundle := s.challenges.Issue(clientIP, s.cfg.PoWDifficultyBits)
 	c.JSON(http.StatusOK, gin.H{
 		"success":       true,
 		"challenge_id":  bundle.ChallengeID,
 		"client_secret": bundle.ClientSecret,
 		"nonce":         bundle.Nonce,
+		"pow_bits":      bundle.PoWBits,
+		"pow_salt":      bundle.PoWSalt,
 		"expires_at":    bundle.ExpiresAt.UTC().Format(time.RFC3339),
 	})
 }
@@ -117,8 +127,10 @@ func (s *Server) handleCreateIssue(c *gin.Context) {
 	challengeID := strings.TrimSpace(c.GetHeader("X-ELS-Challenge-Id"))
 	timestamp := strings.TrimSpace(c.GetHeader("X-ELS-Timestamp"))
 	signature := strings.TrimSpace(c.GetHeader("X-ELS-Signature"))
+	powNonce := strings.TrimSpace(c.GetHeader("X-ELS-PoW-Nonce"))
+	powHash := strings.TrimSpace(c.GetHeader("X-ELS-PoW-Hash"))
 	if challengeID == "" || timestamp == "" || signature == "" {
-		writeError(c, http.StatusUnauthorized, "缺少签名头")
+		writeError(c, http.StatusUnauthorized, "缺少签名请求头")
 		return
 	}
 
@@ -127,6 +139,8 @@ func (s *Server) handleCreateIssue(c *gin.Context) {
 		challengeID,
 		timestamp,
 		signature,
+		powNonce,
+		powHash,
 		http.MethodPost,
 		s.cfg.IssuesPath,
 		body,

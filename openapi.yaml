@@ -17,6 +17,26 @@ paths:
       responses:
         '200':
           description: challenge 已生成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  challenge_id:
+                    type: string
+                  client_secret:
+                    type: string
+                  nonce:
+                    type: string
+                  pow_bits:
+                    type: integer
+                  pow_salt:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
   /v1/feedback/issues:
     post:
       summary: 创建反馈工单
@@ -34,6 +54,16 @@ paths:
         - in: header
           name: X-ELS-Signature
           required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-PoW-Nonce
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-PoW-Hash
+          required: false
           schema:
             type: string
       responses:

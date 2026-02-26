@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: els-feedback-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+  feedback-proxy:
+    build: .
+    container_name: els-feedback-proxy
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_OWNER: ${GITHUB_OWNER:-Eric-Terminal}
+      GITHUB_REPO: ${GITHUB_REPO:-ETOS-LLM-Studio}
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      REDIS_KEY_PREFIX: els-feedback
+      POW_DIFFICULTY_BITS: ${POW_DIFFICULTY_BITS:-20}
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  redis_data:
