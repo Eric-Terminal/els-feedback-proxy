@@ -15,6 +15,11 @@ type SubmitIssueRequest struct {
 	Logs              []string            `json:"logs"`
 }
 
+// SubmitCommentRequest 工单评论请求体。
+type SubmitCommentRequest struct {
+	Body string `json:"body"`
+}
+
 // EnvironmentSnapshot 客户端自动采集环境
 type EnvironmentSnapshot struct {
 	Platform           string `json:"platform"`
@@ -64,6 +69,18 @@ func (r *SubmitIssueRequest) Validate() error {
 	}
 	if len(r.Logs) > 50 {
 		return errBadRequest("logs 条目过多")
+	}
+	return nil
+}
+
+func (r *SubmitCommentRequest) Normalize() {
+	r.Body = strings.TrimSpace(r.Body)
+}
+
+func (r *SubmitCommentRequest) Validate() error {
+	length := len([]rune(r.Body))
+	if length < 1 || length > 4000 {
+		return errBadRequest("comment body 长度必须在 1 到 4000 字符之间")
 	}
 	return nil
 }

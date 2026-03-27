@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -41,9 +42,18 @@ type CreateIssueResult struct {
 	URL    string
 }
 
+type CreateCommentResult struct {
+	ID        int64
+	Author    string
+	Body      string
+	CreatedAt time.Time
+	URL       string
+}
+
 type IssueStatus struct {
 	Number    int
 	Title     string
+	Body      string
 	State     string
 	Labels    []string
 	UpdatedAt time.Time
@@ -94,6 +104,90 @@ func (c *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (Creat
 	return CreateIssueResult{Number: result.Number, URL: result.HTMLURL}, nil
 }
 
+func (c *Client) CreateIssueComment(ctx context.Context, issueNumber int, body string) (CreateCommentResult, error) {
+	requestBody, err := json.Marshal(map[string]string{
+		"body": body,
+	})
+	if err != nil {
+		return CreateCommentResult{}, fmt.Errorf("编码 comment 请求失败: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", c.owner, c.repo, issueNumber)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(requestBody))
+	if err != nil {
+		return CreateCommentResult{}, fmt.Errorf("创建 comment 请求失败: %w", err)
+	}
+
+	c.fillHeaders(request)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return CreateCommentResult{}, fmt.Errorf("调用 GitHub comment 失败: %w", err)
+	}
+	defer response.Body.Close()
+
+	data, _ := io.ReadAll(response.Body)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return CreateCommentResult{}, fmt.Errorf("GitHub 创建 comment 失败: HTTP %d, body=%s", response.StatusCode, string(data))
+	}
+
+	var payload struct {
+		ID        int64  `json:"id"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+		HTMLURL   string `json:"html_url"`
+		User      struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return CreateCommentResult{}, fmt.Errorf("解析 comment 响应失败: %w", err)
+	}
+
+	createdAt, err := time.Parse(time.RFC3339, payload.CreatedAt)
+	if err != nil {
+		createdAt = time.Now()
+	}
+
+	return CreateCommentResult{
+		ID:        payload.ID,
+		Author:    strings.TrimSpace(payload.User.Login),
+		Body:      payload.Body,
+		CreatedAt: createdAt,
+		URL:       payload.HTMLURL,
+	}, nil
+}
+
+func (c *Client) GetAuthenticatedLogin(ctx context.Context) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
+	if err != nil {
+		return "", fmt.Errorf("创建 /user 请求失败: %w", err)
+	}
+	c.fillHeaders(request)
+
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("调用 GitHub /user 失败: %w", err)
+	}
+	defer response.Body.Close()
+
+	data, _ := io.ReadAll(response.Body)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("GitHub /user 失败: HTTP %d, body=%s", response.StatusCode, string(data))
+	}
+
+	var payload struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", fmt.Errorf("解析 /user 响应失败: %w", err)
+	}
+	login := strings.TrimSpace(payload.Login)
+	if login == "" {
+		return "", fmt.Errorf("GitHub /user 未返回 login")
+	}
+	return login, nil
+}
+
 func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStatus, error) {
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d", c.owner, c.repo, issueNumber)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -117,6 +211,7 @@ func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStat
 	var issue struct {
 		Number    int    `json:"number"`
 		Title     string `json:"title"`
+		Body      string `json:"body"`
 		State     string `json:"state"`
 		UpdatedAt string `json:"updated_at"`
 		HTMLURL   string `json:"html_url"`
@@ -150,6 +245,7 @@ func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStat
 	return IssueStatus{
 		Number:    issue.Number,
 		Title:     issue.Title,
+		Body:      issue.Body,
 		State:     issue.State,
 		Labels:    labels,
 		UpdatedAt: updatedAt,
@@ -163,52 +259,74 @@ func (c *Client) fetchComments(ctx context.Context, endpoint string) ([]IssueCom
 		return []IssueComment{}, nil
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("创建 comments 请求失败: %w", err)
-	}
-
-	c.fillHeaders(request)
-
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("调用 GitHub comments 失败: %w", err)
-	}
-	defer response.Body.Close()
-
-	data, _ := io.ReadAll(response.Body)
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("GitHub comments 失败: HTTP %d, body=%s", response.StatusCode, string(data))
-	}
-
-	var raw []struct {
-		ID        int64  `json:"id"`
-		Body      string `json:"body"`
-		CreatedAt string `json:"created_at"`
-		User      struct {
-			Login string `json:"login"`
-		} `json:"user"`
-	}
-
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("解析 comments 响应失败: %w", err)
-	}
-
-	comments := make([]IssueComment, 0, len(raw))
-	for _, item := range raw {
-		createdAt, err := time.Parse(time.RFC3339, item.CreatedAt)
+	comments := make([]IssueComment, 0, 32)
+	for page := 1; page <= 10; page++ {
+		requestURL, err := appendPagination(endpoint, page, 100)
 		if err != nil {
-			createdAt = time.Now()
+			return nil, err
 		}
-		comments = append(comments, IssueComment{
-			ID:        item.ID,
-			Author:    item.User.Login,
-			Body:      item.Body,
-			CreatedAt: createdAt,
-		})
+
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("创建 comments 请求失败: %w", err)
+		}
+		c.fillHeaders(request)
+
+		response, err := c.httpClient.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("调用 GitHub comments 失败: %w", err)
+		}
+
+		data, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return nil, fmt.Errorf("GitHub comments 失败: HTTP %d, body=%s", response.StatusCode, string(data))
+		}
+
+		var raw []struct {
+			ID        int64  `json:"id"`
+			Body      string `json:"body"`
+			CreatedAt string `json:"created_at"`
+			User      struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("解析 comments 响应失败: %w", err)
+		}
+
+		for _, item := range raw {
+			createdAt, err := time.Parse(time.RFC3339, item.CreatedAt)
+			if err != nil {
+				createdAt = time.Now()
+			}
+			comments = append(comments, IssueComment{
+				ID:        item.ID,
+				Author:    strings.TrimSpace(item.User.Login),
+				Body:      item.Body,
+				CreatedAt: createdAt,
+			})
+		}
+
+		if len(raw) < 100 {
+			break
+		}
 	}
 
 	return comments, nil
+}
+
+func appendPagination(endpoint string, page int, perPage int) (string, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("comments URL 无效: %w", err)
+	}
+	query := parsed.Query()
+	query.Set("page", fmt.Sprintf("%d", page))
+	query.Set("per_page", fmt.Sprintf("%d", perPage))
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }
 
 func (c *Client) fillHeaders(request *http.Request) {

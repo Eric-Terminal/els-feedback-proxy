@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"els-feedback-proxy/internal/github"
 	"els-feedback-proxy/internal/moderation"
 )
 
@@ -185,6 +186,81 @@ func renderBlockedArchiveMarkdown(
 		for _, line := range req.Logs {
 			builder.WriteString(fmt.Sprintf("- %s\n", line))
 		}
+	}
+	return builder.String()
+}
+
+func renderBlockedCommentBody(archiveID, archiveFileName, moderationMessage string) string {
+	builder := &strings.Builder{}
+	builder.WriteString("🔒 该评论已被 AI 审核暂时隐藏。\n\n")
+	builder.WriteString("请开发者登录服务器查看留档后处理：\n")
+	builder.WriteString(fmt.Sprintf("- archive_id: `%s`\n", archiveID))
+	builder.WriteString(fmt.Sprintf("- 文件: `DATA_DIR/review-blocked/%s`\n", archiveFileName))
+	if strings.TrimSpace(moderationMessage) != "" {
+		builder.WriteString(fmt.Sprintf("- 审核说明: %s\n", moderationMessage))
+	}
+	return builder.String()
+}
+
+func renderBlockedCommentArchiveMarkdown(
+	archiveID string,
+	clientIPHash string,
+	issueNumber int,
+	issueTitle string,
+	issueBody string,
+	commentBody string,
+	existingComments []github.IssueComment,
+	decision moderation.Decision,
+	reviewErr error,
+	now time.Time,
+) string {
+	builder := &strings.Builder{}
+	builder.WriteString("# 评论审核留档（隐藏内容）\n\n")
+	builder.WriteString("## 元数据\n")
+	builder.WriteString(fmt.Sprintf("- archive_id: %s\n", archiveID))
+	builder.WriteString(fmt.Sprintf("- created_at: %s\n", now.Format(time.RFC3339)))
+	builder.WriteString(fmt.Sprintf("- issue_number: %d\n", issueNumber))
+	builder.WriteString(fmt.Sprintf("- issue_title: %s\n", issueTitle))
+	builder.WriteString(fmt.Sprintf("- client_ip_hash: %s\n\n", clientIPHash))
+
+	builder.WriteString("## 工单正文\n")
+	if strings.TrimSpace(issueBody) == "" {
+		builder.WriteString("- 无正文\n\n")
+	} else {
+		builder.WriteString(issueBody)
+		builder.WriteString("\n\n")
+	}
+
+	builder.WriteString("## 审核结论\n")
+	if reviewErr != nil {
+		builder.WriteString("- allow: false\n")
+		builder.WriteString(fmt.Sprintf("- error: %s\n\n", reviewErr.Error()))
+	} else {
+		builder.WriteString(fmt.Sprintf("- allow: %t\n", decision.Allow))
+		builder.WriteString(fmt.Sprintf("- confidence: %.2f\n", decision.Confidence))
+		if len(decision.Categories) > 0 {
+			builder.WriteString(fmt.Sprintf("- categories: %s\n", strings.Join(decision.Categories, ", ")))
+		}
+		if len(decision.Reasons) > 0 {
+			builder.WriteString("- reasons:\n")
+			for _, reason := range decision.Reasons {
+				builder.WriteString(fmt.Sprintf("  - %s\n", reason))
+			}
+		}
+		builder.WriteString("\n")
+	}
+
+	builder.WriteString("## 用户待发送评论原文\n")
+	builder.WriteString(commentBody)
+	builder.WriteString("\n\n")
+
+	builder.WriteString("## 审核上下文（历史评论）\n")
+	if len(existingComments) == 0 {
+		builder.WriteString("- 无历史评论\n")
+		return builder.String()
+	}
+	for index, item := range existingComments {
+		builder.WriteString(fmt.Sprintf("%d) [%s] %s: %s\n", index+1, item.CreatedAt.UTC().Format(time.RFC3339), item.Author, item.Body))
 	}
 	return builder.String()
 }

@@ -35,11 +35,13 @@ type Server struct {
 	tickets    *store.TicketStore
 	reviewer   moderation.Reviewer
 	archives   *store.BlockedArchiveStore
+	developers map[string]struct{}
 	engine     *gin.Engine
 }
 
 type githubGateway interface {
 	CreateIssue(ctx context.Context, input github.CreateIssueInput) (github.CreateIssueResult, error)
+	CreateIssueComment(ctx context.Context, issueNumber int, body string) (github.CreateCommentResult, error)
 	GetIssueStatus(ctx context.Context, issueNumber int) (github.IssueStatus, error)
 }
 
@@ -76,6 +78,7 @@ func NewServer(
 		tickets:    tickets,
 		reviewer:   reviewer,
 		archives:   archives,
+		developers: buildDeveloperLoginSet(cfg),
 		engine:     gin.New(),
 	}
 
@@ -97,6 +100,7 @@ func (s *Server) registerRoutes() {
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
+	s.engine.POST("/v1/feedback/issues/:issueNumber/comments", s.handleCreateIssueComment)
 }
 
 func (s *Server) handleChallenge(c *gin.Context) {
@@ -292,19 +296,13 @@ func (s *Server) handleGetIssueStatus(c *gin.Context) {
 		return
 	}
 
-	issueNumber, err := strconv.Atoi(strings.TrimSpace(c.Param("issueNumber")))
-	if err != nil || issueNumber <= 0 {
+	issueNumber, err := parseIssueNumber(c.Param("issueNumber"))
+	if err != nil {
 		writeError(c, http.StatusBadRequest, "issue_number 无效")
 		return
 	}
 
-	ticketToken := strings.TrimSpace(c.Query("ticket_token"))
-	if ticketToken == "" {
-		writeError(c, http.StatusForbidden, "缺少 ticket_token")
-		return
-	}
-
-	if !s.tickets.Validate(issueNumber, ticketToken) {
+	if !s.validateTicketToken(issueNumber, strings.TrimSpace(c.Query("ticket_token"))) {
 		writeError(c, http.StatusForbidden, "ticket_token 无效")
 		return
 	}
@@ -318,10 +316,11 @@ func (s *Server) handleGetIssueStatus(c *gin.Context) {
 	comments := make([]gin.H, 0, len(issue.Comments))
 	for _, comment := range issue.Comments {
 		comments = append(comments, gin.H{
-			"id":         fmt.Sprintf("%d", comment.ID),
-			"author":     comment.Author,
-			"body":       comment.Body,
-			"created_at": comment.CreatedAt.UTC().Format(time.RFC3339),
+			"id":           fmt.Sprintf("%d", comment.ID),
+			"author":       comment.Author,
+			"body":         comment.Body,
+			"created_at":   comment.CreatedAt.UTC().Format(time.RFC3339),
+			"is_developer": s.isDeveloperLogin(comment.Author),
 		})
 	}
 
@@ -339,6 +338,177 @@ func (s *Server) handleGetIssueStatus(c *gin.Context) {
 		"closed":       strings.EqualFold(issue.State, "closed"),
 		"comments":     comments,
 	})
+}
+
+func (s *Server) handleCreateIssueComment(c *gin.Context) {
+	if !s.validateUA(c) {
+		writeError(c, http.StatusForbidden, "无效客户端 UA")
+		return
+	}
+
+	clientIP := c.ClientIP()
+	if !s.allowRate("comment", clientIP, s.cfg.CommentLimitPerWindow) {
+		writeError(c, http.StatusTooManyRequests, "评论提交过于频繁")
+		return
+	}
+
+	issueNumber, err := parseIssueNumber(c.Param("issueNumber"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "issue_number 无效")
+		return
+	}
+	ticketToken := strings.TrimSpace(c.Query("ticket_token"))
+	if !s.validateTicketToken(issueNumber, ticketToken) {
+		writeError(c, http.StatusForbidden, "ticket_token 无效")
+		return
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "读取请求体失败")
+		return
+	}
+
+	challengeID := strings.TrimSpace(c.GetHeader("X-ELS-Challenge-Id"))
+	timestamp := strings.TrimSpace(c.GetHeader("X-ELS-Timestamp"))
+	signature := strings.TrimSpace(c.GetHeader("X-ELS-Signature"))
+	powNonce := strings.TrimSpace(c.GetHeader("X-ELS-PoW-Nonce"))
+	powHash := strings.TrimSpace(c.GetHeader("X-ELS-PoW-Hash"))
+	if challengeID == "" || timestamp == "" || signature == "" {
+		writeError(c, http.StatusUnauthorized, "缺少签名请求头")
+		return
+	}
+
+	commentPath := fmt.Sprintf("%s/%d/comments", s.cfg.IssuesPath, issueNumber)
+	verifyErr := s.challenges.VerifySubmission(
+		clientIP,
+		challengeID,
+		timestamp,
+		signature,
+		powNonce,
+		powHash,
+		http.MethodPost,
+		commentPath,
+		body,
+	)
+	if verifyErr != nil {
+		if errors.Is(verifyErr, security.ErrClientBlocked) {
+			writeError(c, http.StatusTooManyRequests, "签名校验失败次数过多，已临时封禁")
+			return
+		}
+		writeError(c, http.StatusUnauthorized, fmt.Sprintf("签名校验失败: %s", verifyErr.Error()))
+		return
+	}
+
+	var req SubmitCommentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(c, http.StatusBadRequest, "请求体格式无效")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		if typed, ok := err.(apiError); ok {
+			writeError(c, typed.Code, typed.Message)
+			return
+		}
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	issueStatus, err := s.gh.GetIssueStatus(c.Request.Context(), issueNumber)
+	if err != nil {
+		writeError(c, http.StatusBadGateway, fmt.Sprintf("GitHub 查询失败: %v", err))
+		return
+	}
+
+	commentDedupeKey := hashString(strings.Join([]string{
+		clientIP,
+		strconv.Itoa(issueNumber),
+		req.Body,
+	}, "|"))
+	if s.dedupe.SeenRecently(commentDedupeKey, s.cfg.DuplicateWindow) {
+		writeError(c, http.StatusConflict, "检测到短时间重复评论")
+		return
+	}
+
+	reviewDecision, reviewErr := s.reviewer.Review(c.Request.Context(), moderation.ReviewInput{
+		Type:   "comment",
+		Title:  issueStatus.Title,
+		Detail: req.Body,
+		ExtraContext: buildCommentModerationContext(
+			issueStatus.Title,
+			issueStatus.Body,
+			issueStatus.Comments,
+		),
+	})
+	moderationBlocked := reviewErr != nil || !reviewDecision.Allow
+	moderationMessage := buildModerationMessage(reviewDecision, reviewErr)
+
+	statusCode := http.StatusOK
+	response := gin.H{
+		"success": true,
+	}
+
+	if moderationBlocked {
+		if s.archives == nil {
+			writeError(c, http.StatusInternalServerError, "审核留档存储未初始化")
+			return
+		}
+		archiveID := randomToken(12)
+		archiveMarkdown := renderBlockedCommentArchiveMarkdown(
+			archiveID,
+			hashString(clientIP),
+			issueNumber,
+			issueStatus.Title,
+			issueStatus.Body,
+			req.Body,
+			issueStatus.Comments,
+			reviewDecision,
+			reviewErr,
+			time.Now().UTC(),
+		)
+		archiveFile, err := s.archives.SaveMarkdown(archiveID, archiveMarkdown)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, fmt.Sprintf("保存审核留档失败: %v", err))
+			return
+		}
+
+		placeholder := renderBlockedCommentBody(archiveID, archiveFile, moderationMessage)
+		createdComment, err := s.gh.CreateIssueComment(c.Request.Context(), issueNumber, placeholder)
+		if err != nil {
+			writeError(c, http.StatusBadGateway, fmt.Sprintf("GitHub 评论创建失败: %v", err))
+			return
+		}
+
+		statusCode = http.StatusAccepted
+		response["moderation_blocked"] = true
+		response["moderation_message"] = moderationMessage
+		response["archive_id"] = archiveID
+		response["comment"] = gin.H{
+			"id":           fmt.Sprintf("%d", createdComment.ID),
+			"author":       createdComment.Author,
+			"body":         createdComment.Body,
+			"created_at":   createdComment.CreatedAt.UTC().Format(time.RFC3339),
+			"is_developer": s.isDeveloperLogin(createdComment.Author),
+		}
+		c.JSON(statusCode, response)
+		return
+	}
+
+	createdComment, err := s.gh.CreateIssueComment(c.Request.Context(), issueNumber, req.Body)
+	if err != nil {
+		writeError(c, http.StatusBadGateway, fmt.Sprintf("GitHub 评论创建失败: %v", err))
+		return
+	}
+
+	response["comment"] = gin.H{
+		"id":           fmt.Sprintf("%d", createdComment.ID),
+		"author":       createdComment.Author,
+		"body":         createdComment.Body,
+		"created_at":   createdComment.CreatedAt.UTC().Format(time.RFC3339),
+		"is_developer": s.isDeveloperLogin(createdComment.Author),
+	}
+	c.JSON(statusCode, response)
 }
 
 func (s *Server) validateUA(c *gin.Context) bool {
@@ -365,6 +535,21 @@ func (s *Server) dedupeKey(clientIP string, req SubmitIssueRequest) string {
 	return hashString(input)
 }
 
+func (s *Server) validateTicketToken(issueNumber int, ticketToken string) bool {
+	if strings.TrimSpace(ticketToken) == "" {
+		return false
+	}
+	return s.tickets.Validate(issueNumber, ticketToken)
+}
+
+func parseIssueNumber(raw string) (int, error) {
+	issueNumber, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || issueNumber <= 0 {
+		return 0, fmt.Errorf("invalid issue number")
+	}
+	return issueNumber, nil
+}
+
 func buildModerationMessage(decision moderation.Decision, reviewErr error) string {
 	if reviewErr != nil {
 		return fmt.Sprintf("AI 审核异常，系统已按保护策略暂时隐藏内容：%s", reviewErr.Error())
@@ -376,6 +561,53 @@ func buildModerationMessage(decision moderation.Decision, reviewErr error) strin
 		return "AI 审核判定当前反馈不适合公开展示，已暂时隐藏。"
 	}
 	return "AI 审核暂时隐藏： " + strings.Join(decision.Reasons, "；")
+}
+
+func buildDeveloperLoginSet(cfg config.Config) map[string]struct{} {
+	result := map[string]struct{}{}
+	addLogin := func(raw string) {
+		value := strings.ToLower(strings.TrimSpace(raw))
+		if value == "" {
+			return
+		}
+		result[value] = struct{}{}
+	}
+
+	addLogin(cfg.GitHubOwner)
+	addLogin(cfg.GitHubTokenLogin)
+	for _, login := range cfg.DeveloperLogins {
+		addLogin(login)
+	}
+	return result
+}
+
+func (s *Server) isDeveloperLogin(author string) bool {
+	_, ok := s.developers[strings.ToLower(strings.TrimSpace(author))]
+	return ok
+}
+
+func buildCommentModerationContext(issueTitle string, issueBody string, comments []github.IssueComment) string {
+	builder := &strings.Builder{}
+	builder.WriteString("### 当前工单标题\n")
+	builder.WriteString(issueTitle)
+	builder.WriteString("\n\n### 当前工单正文\n")
+	if strings.TrimSpace(issueBody) == "" {
+		builder.WriteString("- 无正文\n")
+	} else {
+		builder.WriteString(issueBody)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\n### 历史评论（按时间顺序）\n")
+
+	if len(comments) == 0 {
+		builder.WriteString("- 无历史评论\n")
+		return builder.String()
+	}
+
+	for index, comment := range comments {
+		builder.WriteString(fmt.Sprintf("%d) [%s] %s: %s\n", index+1, comment.CreatedAt.UTC().Format(time.RFC3339), comment.Author, comment.Body))
+	}
+	return builder.String()
 }
 
 func platformLabel(platform string) string {

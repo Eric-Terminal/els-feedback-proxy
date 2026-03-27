@@ -133,3 +133,54 @@ paths:
           description: 查询成功
         '403':
           description: ticket_token 无效
+  /v1/feedback/issues/{issue_number}/comments:
+    post:
+      summary: 在反馈工单下发送评论
+      parameters:
+        - in: path
+          name: issue_number
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: ticket_token
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Challenge-Id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Timestamp
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Signature
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-PoW-Nonce
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+      responses:
+        '200':
+          description: 评论已发布
+        '202':
+          description: 评论被暂时隐藏，已发布占位评论
+        '403':
+          description: ticket_token 无效

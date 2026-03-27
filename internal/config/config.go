@@ -14,6 +14,8 @@ type Config struct {
 	GitHubToken             string
 	GitHubOwner             string
 	GitHubRepo              string
+	GitHubTokenLogin        string
+	DeveloperLogins         []string
 	DataDir                 string
 	RequiredUAKeyword       string
 	RedisAddr               string
@@ -31,6 +33,7 @@ type Config struct {
 	ChallengeLimitPerWindow int
 	SubmitLimitPerWindow    int
 	QueryLimitPerWindow     int
+	CommentLimitPerWindow   int
 	ModerationEnabled       bool
 	ModerationAPIBaseURL    string
 	ModerationAPIKey        string
@@ -47,6 +50,8 @@ func Load() (Config, error) {
 		GitHubToken:             os.Getenv("GITHUB_TOKEN"),
 		GitHubOwner:             getEnv("GITHUB_OWNER", "Eric-Terminal"),
 		GitHubRepo:              getEnv("GITHUB_REPO", "ETOS-LLM-Studio"),
+		GitHubTokenLogin:        strings.TrimSpace(os.Getenv("GITHUB_TOKEN_LOGIN")),
+		DeveloperLogins:         getEnvAsStringSlice("DEVELOPER_GITHUB_LOGINS"),
 		DataDir:                 getEnv("DATA_DIR", "./data"),
 		RequiredUAKeyword:       getEnv("REQUIRED_UA_KEYWORD", "ETOS LLM Studio"),
 		RedisAddr:               strings.TrimSpace(os.Getenv("REDIS_ADDR")),
@@ -64,6 +69,7 @@ func Load() (Config, error) {
 		ChallengeLimitPerWindow: getEnvAsInt("CHALLENGE_LIMIT_PER_WINDOW", 30),
 		SubmitLimitPerWindow:    getEnvAsInt("SUBMIT_LIMIT_PER_WINDOW", 6),
 		QueryLimitPerWindow:     getEnvAsInt("QUERY_LIMIT_PER_WINDOW", 60),
+		CommentLimitPerWindow:   getEnvAsInt("COMMENT_LIMIT_PER_WINDOW", 20),
 		ModerationEnabled:       getEnvAsBool("MODERATION_ENABLED", true),
 		ModerationAPIBaseURL:    strings.TrimSpace(os.Getenv("MODERATION_API_BASE_URL")),
 		ModerationAPIKey:        strings.TrimSpace(os.Getenv("MODERATION_API_KEY")),
@@ -136,6 +142,22 @@ func getEnvAsBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func getEnvAsStringSlice(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return []string{}
+	}
+	items := strings.Split(raw, ",")
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func clampInt(value, min, max int) int {

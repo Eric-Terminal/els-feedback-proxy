@@ -5,6 +5,7 @@
 ## 功能概览
 - `POST /v1/feedback/challenge`：下发一次性 challenge（120 秒有效）
 - `POST /v1/feedback/issues`：校验签名后先走 LLM 审核，再创建 GitHub Issue（可能为隐藏内容工单）
+- `POST /v1/feedback/issues/:issue_number/comments`：在指定工单下发送评论（同样经过签名与 LLM 审核）
 - `GET /v1/feedback/issues/:issue_number`：校验 ticket token 后返回过滤后的状态与公开评论
 - `GET /v1/healthz`：健康检查
 
@@ -33,6 +34,8 @@
 - `GITHUB_TOKEN`：Fine-grained PAT（必填）
 - `GITHUB_OWNER`：默认 `Eric-Terminal`
 - `GITHUB_REPO`：默认 `ETOS-LLM-Studio`
+- `GITHUB_TOKEN_LOGIN`：令牌所属账号 login（可选，不填会尝试自动调用 GitHub `/user` 获取）
+- `DEVELOPER_GITHUB_LOGINS`：额外开发者账号列表（可选，逗号分隔）
 - `DATA_DIR`：本地数据目录（默认 `./data`）
 - `REQUIRED_UA_KEYWORD`：默认 `ETOS LLM Studio`
 - `POW_DIFFICULTY_BITS`：PoW 难度（默认 `20`，范围 `0~30`）
@@ -47,6 +50,7 @@
 - `REDIS_PASSWORD`：Redis 密码（可选）
 - `REDIS_DB`：Redis DB（默认 `0`）
 - `REDIS_KEY_PREFIX`：Redis Key 前缀（默认 `els-feedback`）
+- `COMMENT_LIMIT_PER_WINDOW`：评论限流（默认 `20`，每 15 分钟）
 
 当配置 `REDIS_ADDR` 且可连通时，限流与去重会自动升级为 Redis 全局模式；连接失败会自动回退到内存模式。
 
@@ -97,6 +101,12 @@ POW_SALT
 POW_NONCE
 ```
 
+评论提交时签名串与 PoW 串与创建工单一致，仅 `PATH` 改为：
+
+```text
+/v1/feedback/issues/{issue_number}/comments
+```
+
 ## 审核响应说明
 - 正常放行：`200`
 - 隐藏内容工单：`202`
@@ -104,3 +114,15 @@ POW_NONCE
     - `moderation_blocked: true`
     - `archive_id: string`
     - `moderation_message: string`
+
+评论接口同样适用 `200/202` 语义：
+- `200`：评论已公开发布
+- `202`：评论已被隐藏并改发占位评论（附 `archive_id`）
+
+## 令牌账号与仓库所有者分离说明
+可以使用“小号 token + 主号仓库”模式：
+- `GITHUB_TOKEN` 使用小号 PAT
+- `GITHUB_OWNER/GITHUB_REPO` 指向主仓库
+- 小号需具备目标仓库 Issues 读写权限
+
+服务会用 `GITHUB_TOKEN_LOGIN`（或自动识别 login）与 `DEVELOPER_GITHUB_LOGINS` 标记开发者评论身份，便于客户端区分“开发者回复”。

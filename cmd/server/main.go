@@ -30,6 +30,17 @@ func main() {
 	}
 
 	ghClient := github.NewClient(cfg.GitHubToken, cfg.GitHubOwner, cfg.GitHubRepo)
+	if cfg.GitHubTokenLogin == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		login, loginErr := ghClient.GetAuthenticatedLogin(ctx)
+		cancel()
+		if loginErr != nil {
+			log.Printf("自动识别 token 所属账号失败: %v", loginErr)
+		} else {
+			cfg.GitHubTokenLogin = login
+			log.Printf("已识别 token 所属账号: %s", login)
+		}
+	}
 	var limiter rateLimiter = security.NewFixedWindowLimiter()
 	var dedupe duplicateDetector = security.NewDuplicateDetector()
 

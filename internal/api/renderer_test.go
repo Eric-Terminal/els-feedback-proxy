@@ -57,6 +57,16 @@ func TestRenderBlockedArchiveMarkdownContainsOriginalText(t *testing.T) {
 	}
 }
 
+func TestRenderBlockedCommentBodyContainsArchiveInfo(t *testing.T) {
+	body := renderBlockedCommentBody("archive-comment-1", "archive-archive-comment-1.md", "审核拦截")
+	if !strings.Contains(body, "archive-comment-1") {
+		t.Fatalf("隐藏评论模板应包含 archive_id")
+	}
+	if !strings.Contains(body, "review-blocked") {
+		t.Fatalf("隐藏评论模板应提示服务器文件路径")
+	}
+}
+
 func testNow() (now time.Time) {
 	return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 }
