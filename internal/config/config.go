@@ -31,6 +31,13 @@ type Config struct {
 	ChallengeLimitPerWindow int
 	SubmitLimitPerWindow    int
 	QueryLimitPerWindow     int
+	ModerationEnabled       bool
+	ModerationAPIBaseURL    string
+	ModerationAPIKey        string
+	ModerationModel         string
+	ModerationTimeout       time.Duration
+	ModerationMaxRetries    int
+	ModerationTemperature   float64
 }
 
 // Load 从环境变量加载配置
@@ -57,10 +64,29 @@ func Load() (Config, error) {
 		ChallengeLimitPerWindow: getEnvAsInt("CHALLENGE_LIMIT_PER_WINDOW", 30),
 		SubmitLimitPerWindow:    getEnvAsInt("SUBMIT_LIMIT_PER_WINDOW", 6),
 		QueryLimitPerWindow:     getEnvAsInt("QUERY_LIMIT_PER_WINDOW", 60),
+		ModerationEnabled:       getEnvAsBool("MODERATION_ENABLED", true),
+		ModerationAPIBaseURL:    strings.TrimSpace(os.Getenv("MODERATION_API_BASE_URL")),
+		ModerationAPIKey:        strings.TrimSpace(os.Getenv("MODERATION_API_KEY")),
+		ModerationModel:         strings.TrimSpace(os.Getenv("MODERATION_MODEL")),
+		ModerationTimeout:       time.Duration(clampInt(getEnvAsInt("MODERATION_TIMEOUT_SECONDS", 15), 3, 120)) * time.Second,
+		ModerationMaxRetries:    clampInt(getEnvAsInt("MODERATION_MAX_RETRIES", 3), 1, 5),
+		ModerationTemperature:   clampFloat(getEnvAsFloat("MODERATION_TEMPERATURE", 0), 0, 2),
 	}
 
 	if cfg.GitHubToken == "" {
 		return Config{}, errors.New("缺少 GITHUB_TOKEN")
+	}
+	if cfg.ModerationEnabled {
+		if cfg.ModerationAPIBaseURL == "" {
+			return Config{}, errors.New("缺少 MODERATION_API_BASE_URL")
+		}
+		if cfg.ModerationAPIKey == "" {
+			return Config{}, errors.New("缺少 MODERATION_API_KEY")
+		}
+		if cfg.ModerationModel == "" {
+			return Config{}, errors.New("缺少 MODERATION_MODEL")
+		}
+		cfg.ModerationAPIBaseURL = normalizeModerationBaseURL(cfg.ModerationAPIBaseURL)
 	}
 
 	return cfg, nil
@@ -85,6 +111,33 @@ func getEnvAsInt(key string, fallback int) int {
 	return parsed
 }
 
+func getEnvAsFloat(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func clampInt(value, min, max int) int {
 	if value < min {
 		return min
@@ -93,4 +146,23 @@ func clampInt(value, min, max int) int {
 		return max
 	}
 	return value
+}
+
+func clampFloat(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func normalizeModerationBaseURL(raw string) string {
+	cleaned := strings.TrimSpace(raw)
+	cleaned = strings.TrimRight(cleaned, "/")
+	if strings.HasSuffix(cleaned, "/v1") {
+		return cleaned
+	}
+	return cleaned + "/v1"
 }

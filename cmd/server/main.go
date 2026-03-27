@@ -8,6 +8,7 @@ import (
 	"els-feedback-proxy/internal/api"
 	"els-feedback-proxy/internal/config"
 	"els-feedback-proxy/internal/github"
+	"els-feedback-proxy/internal/moderation"
 	"els-feedback-proxy/internal/security"
 	"els-feedback-proxy/internal/store"
 
@@ -63,7 +64,24 @@ func main() {
 		log.Fatalf("票据存储初始化失败: %v", err)
 	}
 
-	srv := api.NewServer(cfg, ghClient, limiter, dedupe, challenges, ticketStore)
+	blockedArchiveStore, err := store.NewBlockedArchiveStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("审核留档存储初始化失败: %v", err)
+	}
+
+	var reviewer moderation.Reviewer = moderation.AllowAllReviewer{}
+	if cfg.ModerationEnabled {
+		reviewer = moderation.NewOpenAIReviewer(moderation.OpenAIReviewerConfig{
+			BaseURL:     cfg.ModerationAPIBaseURL,
+			APIKey:      cfg.ModerationAPIKey,
+			Model:       cfg.ModerationModel,
+			Timeout:     cfg.ModerationTimeout,
+			MaxRetries:  cfg.ModerationMaxRetries,
+			Temperature: cfg.ModerationTemperature,
+		})
+	}
+
+	srv := api.NewServer(cfg, ghClient, limiter, dedupe, challenges, ticketStore, reviewer, blockedArchiveStore)
 
 	log.Printf("ELS Feedback Proxy 启动: :%s", cfg.Port)
 	if err := srv.Run(); err != nil {

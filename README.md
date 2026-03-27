@@ -4,7 +4,7 @@
 
 ## 功能概览
 - `POST /v1/feedback/challenge`：下发一次性 challenge（120 秒有效）
-- `POST /v1/feedback/issues`：校验签名后创建 GitHub Issue
+- `POST /v1/feedback/issues`：校验签名后先走 LLM 审核，再创建 GitHub Issue（可能为隐藏内容工单）
 - `GET /v1/feedback/issues/:issue_number`：校验 ticket token 后返回过滤后的状态与公开评论
 - `GET /v1/healthz`：健康检查
 
@@ -23,6 +23,10 @@
   - challenge 单次使用
   - 签名失败累计阈值：5 次，封禁 10 分钟
 - 重复提交拦截：同 IP + 同内容摘要，10 分钟内重复返回 `409`
+- LLM 审核
+  - 非违规内容优先放行
+  - 违规或审核异常（最多重试 3 次后仍失败）会走“隐藏内容工单”
+  - 原文写入 `DATA_DIR/review-blocked/` 单条 Markdown 留档，GitHub 仅保留 archive_id 提示
 
 ## 环境变量
 - `PORT`：监听端口（默认 `8080`）
@@ -32,6 +36,13 @@
 - `DATA_DIR`：本地数据目录（默认 `./data`）
 - `REQUIRED_UA_KEYWORD`：默认 `ETOS LLM Studio`
 - `POW_DIFFICULTY_BITS`：PoW 难度（默认 `20`，范围 `0~30`）
+- `MODERATION_ENABLED`：是否启用审核（默认 `true`）
+- `MODERATION_API_BASE_URL`：审核 API 基础地址（必填，OpenAI 兼容接口）
+- `MODERATION_API_KEY`：审核 API Key（必填）
+- `MODERATION_MODEL`：审核模型名（必填）
+- `MODERATION_TIMEOUT_SECONDS`：单次审核超时秒数（默认 `15`）
+- `MODERATION_MAX_RETRIES`：审核失败重试次数（默认 `3`）
+- `MODERATION_TEMPERATURE`：审核温度（默认 `0`）
 - `REDIS_ADDR`：Redis 地址（可选，示例 `127.0.0.1:6379`）
 - `REDIS_PASSWORD`：Redis 密码（可选）
 - `REDIS_DB`：Redis DB（默认 `0`）
@@ -85,3 +96,11 @@ CHALLENGE_ID
 POW_SALT
 POW_NONCE
 ```
+
+## 审核响应说明
+- 正常放行：`200`
+- 隐藏内容工单：`202`
+  - 额外字段：
+    - `moderation_blocked: true`
+    - `archive_id: string`
+    - `moderation_message: string`

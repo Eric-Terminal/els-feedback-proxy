@@ -69,6 +69,47 @@ paths:
       responses:
         '200':
           description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  issue_number:
+                    type: integer
+                  ticket_token:
+                    type: string
+                  public_url:
+                    type: string
+                    format: uri
+                  status:
+                    type: string
+        '202':
+          description: 已受理但内容被暂时隐藏
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  issue_number:
+                    type: integer
+                  ticket_token:
+                    type: string
+                  public_url:
+                    type: string
+                    format: uri
+                  status:
+                    type: string
+                    enum: [blocked]
+                  moderation_blocked:
+                    type: boolean
+                  moderation_message:
+                    type: string
+                  archive_id:
+                    type: string
         '401':
           description: 签名或 challenge 校验失败
         '429':

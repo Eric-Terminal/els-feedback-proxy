@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -19,6 +20,7 @@ import (
 
 	"els-feedback-proxy/internal/config"
 	"els-feedback-proxy/internal/github"
+	"els-feedback-proxy/internal/moderation"
 	"els-feedback-proxy/internal/security"
 	"els-feedback-proxy/internal/store"
 )
@@ -26,12 +28,19 @@ import (
 // Server HTTP 服务封装
 type Server struct {
 	cfg        config.Config
-	gh         *github.Client
+	gh         githubGateway
 	limiter    rateLimiter
 	dedupe     duplicateDetector
 	challenges *security.ChallengeManager
 	tickets    *store.TicketStore
+	reviewer   moderation.Reviewer
+	archives   *store.BlockedArchiveStore
 	engine     *gin.Engine
+}
+
+type githubGateway interface {
+	CreateIssue(ctx context.Context, input github.CreateIssueInput) (github.CreateIssueResult, error)
+	GetIssueStatus(ctx context.Context, issueNumber int) (github.IssueStatus, error)
 }
 
 type rateLimiter interface {
@@ -44,13 +53,19 @@ type duplicateDetector interface {
 
 func NewServer(
 	cfg config.Config,
-	gh *github.Client,
+	gh githubGateway,
 	limiter rateLimiter,
 	dedupe duplicateDetector,
 	challenges *security.ChallengeManager,
 	tickets *store.TicketStore,
+	reviewer moderation.Reviewer,
+	archives *store.BlockedArchiveStore,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
+
+	if reviewer == nil {
+		reviewer = moderation.AllowAllReviewer{}
+	}
 
 	server := &Server{
 		cfg:        cfg,
@@ -59,6 +74,8 @@ func NewServer(
 		dedupe:     dedupe,
 		challenges: challenges,
 		tickets:    tickets,
+		reviewer:   reviewer,
+		archives:   archives,
 		engine:     gin.New(),
 	}
 
@@ -176,16 +193,60 @@ func (s *Server) handleCreateIssue(c *gin.Context) {
 		return
 	}
 
-	labels := []string{"source/app-feedback", "status/triage", platformLabel(req.Environment.Platform)}
+	ipHash := hashString(clientIP)
+	reviewDecision, reviewErr := s.reviewer.Review(c.Request.Context(), moderation.ReviewInput{
+		Type:              req.Type,
+		Title:             req.Title,
+		Detail:            req.Detail,
+		ReproductionSteps: req.ReproductionSteps,
+		ExpectedBehavior:  req.ExpectedBehavior,
+		ActualBehavior:    req.ActualBehavior,
+		ExtraContext:      req.ExtraContext,
+	})
+	moderationBlocked := reviewErr != nil || !reviewDecision.Allow
+
+	labels := []string{"source/app-feedback", platformLabel(req.Environment.Platform)}
 	if req.Type == "bug" {
 		labels = append(labels, "type/bug")
 	} else {
 		labels = append(labels, "type/feature")
 	}
 
-	ipHash := hashString(clientIP)
 	issueTitle := renderIssueTitle(req)
 	issueBody := renderIssueBody(req, ipHash)
+	publicStatus := "triage"
+	httpStatus := http.StatusOK
+	var archiveID string
+	var moderationMessage string
+
+	if moderationBlocked {
+		if s.archives == nil {
+			writeError(c, http.StatusInternalServerError, "审核留档存储未初始化")
+			return
+		}
+		archiveID = randomToken(12)
+		moderationMessage = buildModerationMessage(reviewDecision, reviewErr)
+		archiveMarkdown := renderBlockedArchiveMarkdown(
+			archiveID,
+			ipHash,
+			req,
+			reviewDecision,
+			reviewErr,
+			time.Now().UTC(),
+		)
+		archiveFile, err := s.archives.SaveMarkdown(archiveID, archiveMarkdown)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, fmt.Sprintf("保存审核留档失败: %v", err))
+			return
+		}
+		labels = append(labels, "status/blocked", "moderation/blocked")
+		issueTitle = renderBlockedIssueTitle(req)
+		issueBody = renderBlockedIssueBody(archiveID, archiveFile, moderationMessage)
+		publicStatus = "blocked"
+		httpStatus = http.StatusAccepted
+	} else {
+		labels = append(labels, "status/triage")
+	}
 
 	issue, err := s.gh.CreateIssue(c.Request.Context(), github.CreateIssueInput{
 		Title:  issueTitle,
@@ -203,13 +264,20 @@ func (s *Server) handleCreateIssue(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success":      true,
 		"issue_number": issue.Number,
 		"ticket_token": ticketToken,
 		"public_url":   issue.URL,
-		"status":       "triage",
-	})
+		"status":       publicStatus,
+	}
+	if moderationBlocked {
+		response["moderation_blocked"] = true
+		response["moderation_message"] = moderationMessage
+		response["archive_id"] = archiveID
+	}
+
+	c.JSON(httpStatus, response)
 }
 
 func (s *Server) handleGetIssueStatus(c *gin.Context) {
@@ -295,6 +363,19 @@ func (s *Server) allowRate(action, clientIP string, limit int) bool {
 func (s *Server) dedupeKey(clientIP string, req SubmitIssueRequest) string {
 	input := strings.Join([]string{clientIP, req.Type, req.Title, req.Detail}, "|")
 	return hashString(input)
+}
+
+func buildModerationMessage(decision moderation.Decision, reviewErr error) string {
+	if reviewErr != nil {
+		return fmt.Sprintf("AI 审核异常，系统已按保护策略暂时隐藏内容：%s", reviewErr.Error())
+	}
+	if decision.Allow {
+		return ""
+	}
+	if len(decision.Reasons) == 0 {
+		return "AI 审核判定当前反馈不适合公开展示，已暂时隐藏。"
+	}
+	return "AI 审核暂时隐藏： " + strings.Join(decision.Reasons, "；")
 }
 
 func platformLabel(platform string) string {
