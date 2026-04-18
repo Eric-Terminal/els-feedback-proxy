@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -28,6 +29,7 @@ import (
 const (
 	selfUpdateStateFileName = ".self-update-state.json"
 	selfUpdateAPIBaseURL    = "https://api.github.com"
+	selfUpdateJobTimeout    = 10 * time.Minute
 )
 
 var errSelfUpdateBusy = errors.New("自动更新正在进行中")
@@ -46,6 +48,12 @@ type selfUpdateResult struct {
 	RestartScheduled bool      `json:"restart_scheduled"`
 	AlreadyCurrent   bool      `json:"already_current"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type selfUpdateDispatchResult struct {
+	Tag        string    `json:"tag"`
+	Force      bool      `json:"force"`
+	AcceptedAt time.Time `json:"accepted_at"`
 }
 
 type selfUpdateState struct {
@@ -73,6 +81,11 @@ type githubRelease struct {
 type selfUpdateManager struct {
 	mu              sync.Mutex
 	inProgress      bool
+	currentTag      string
+	lastRequestedAt time.Time
+	lastCompletedAt time.Time
+	lastError       string
+	lastResult      *selfUpdateResult
 	secret          string
 	repoOwner       string
 	repoName        string
@@ -158,6 +171,26 @@ func (u *selfUpdateManager) statusSnapshot() map[string]any {
 		"build_time":   buildinfo.BuildTime,
 	}
 
+	u.mu.Lock()
+	snapshot["in_progress"] = u.inProgress
+	if u.currentTag != "" {
+		snapshot["current_tag"] = u.currentTag
+	}
+	if !u.lastRequestedAt.IsZero() {
+		snapshot["last_requested_at"] = u.lastRequestedAt.UTC().Format(time.RFC3339)
+	}
+	if !u.lastCompletedAt.IsZero() {
+		snapshot["last_completed_at"] = u.lastCompletedAt.UTC().Format(time.RFC3339)
+	}
+	if u.lastError != "" {
+		snapshot["last_error"] = u.lastError
+	}
+	if u.lastResult != nil {
+		resultCopy := *u.lastResult
+		snapshot["last_result"] = resultCopy
+	}
+	u.mu.Unlock()
+
 	if state, err := u.loadState(); err == nil {
 		snapshot["last_deployed_tag"] = state.Tag
 		snapshot["last_updated_at"] = state.UpdatedAt.UTC().Format(time.RFC3339)
@@ -166,24 +199,66 @@ func (u *selfUpdateManager) statusSnapshot() map[string]any {
 	return snapshot
 }
 
+func (u *selfUpdateManager) startRelease(rawTag string, force bool) (selfUpdateDispatchResult, error) {
+	tag := normalizeReleaseTag(rawTag)
+	if tag == "" {
+		return selfUpdateDispatchResult{}, fmt.Errorf("tag 不能为空")
+	}
+
+	acceptedAt := u.now().UTC()
+	u.mu.Lock()
+	if u.inProgress {
+		u.mu.Unlock()
+		return selfUpdateDispatchResult{}, errSelfUpdateBusy
+	}
+	u.inProgress = true
+	u.currentTag = tag
+	u.lastRequestedAt = acceptedAt
+	u.lastCompletedAt = time.Time{}
+	u.lastError = ""
+	u.lastResult = nil
+	u.mu.Unlock()
+
+	go u.runRelease(tag, force)
+
+	return selfUpdateDispatchResult{
+		Tag:        tag,
+		Force:      force,
+		AcceptedAt: acceptedAt,
+	}, nil
+}
+
+func (u *selfUpdateManager) runRelease(tag string, force bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), selfUpdateJobTimeout)
+	defer cancel()
+
+	result, err := u.applyRelease(ctx, tag, force)
+
+	u.mu.Lock()
+	u.inProgress = false
+	u.currentTag = ""
+	u.lastCompletedAt = u.now().UTC()
+	if err != nil {
+		u.lastError = err.Error()
+		u.lastResult = nil
+		u.mu.Unlock()
+		log.Printf("自动更新失败: tag=%s err=%v", tag, err)
+		return
+	}
+
+	resultCopy := result
+	u.lastError = ""
+	u.lastResult = &resultCopy
+	u.mu.Unlock()
+
+	log.Printf("自动更新任务完成: tag=%s asset=%s restart_scheduled=%t", result.Tag, result.AssetName, result.RestartScheduled)
+}
+
 func (u *selfUpdateManager) applyRelease(ctx context.Context, rawTag string, force bool) (selfUpdateResult, error) {
 	tag := normalizeReleaseTag(rawTag)
 	if tag == "" {
 		return selfUpdateResult{}, fmt.Errorf("tag 不能为空")
 	}
-
-	u.mu.Lock()
-	if u.inProgress {
-		u.mu.Unlock()
-		return selfUpdateResult{}, errSelfUpdateBusy
-	}
-	u.inProgress = true
-	u.mu.Unlock()
-	defer func() {
-		u.mu.Lock()
-		u.inProgress = false
-		u.mu.Unlock()
-	}()
 
 	if !force {
 		if versionMatchesTag(buildinfo.Version, tag) {

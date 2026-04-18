@@ -576,7 +576,7 @@ func (s *Server) handleSelfUpdate(c *gin.Context) {
 		return
 	}
 
-	result, err := s.selfUpdater.applyRelease(c.Request.Context(), req.Tag, req.Force)
+	accepted, err := s.selfUpdater.startRelease(req.Tag, req.Force)
 	if err != nil {
 		if errors.Is(err, errSelfUpdateBusy) {
 			writeError(c, http.StatusConflict, err.Error())
@@ -587,8 +587,9 @@ func (s *Server) handleSelfUpdate(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"success": true,
-		"result":  result,
+		"success":  true,
+		"accepted": accepted,
+		"status":   s.selfUpdater.statusSnapshot(),
 	})
 }
 
