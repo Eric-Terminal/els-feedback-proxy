@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"els-feedback-proxy/internal/buildinfo"
 	"els-feedback-proxy/internal/config"
 	"els-feedback-proxy/internal/github"
 	"els-feedback-proxy/internal/moderation"
@@ -32,6 +33,7 @@ type Server struct {
 	limiter     rateLimiter
 	dedupe      duplicateDetector
 	statusCache *issueStatusCache
+	selfUpdater *selfUpdateManager
 	challenges  *security.ChallengeManager
 	tickets     *store.TicketStore
 	reviewer    moderation.Reviewer
@@ -76,6 +78,7 @@ func NewServer(
 		limiter:     limiter,
 		dedupe:      dedupe,
 		statusCache: newIssueStatusCache(time.Hour),
+		selfUpdater: newSelfUpdateManager(cfg),
 		challenges:  challenges,
 		tickets:     tickets,
 		reviewer:    reviewer,
@@ -96,13 +99,24 @@ func (s *Server) Run() error {
 
 func (s *Server) registerRoutes() {
 	s.engine.GET("/v1/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true, "time": time.Now().UTC().Format(time.RFC3339)})
+		c.JSON(http.StatusOK, gin.H{
+			"ok":                  true,
+			"time":                time.Now().UTC().Format(time.RFC3339),
+			"version":             buildinfo.Version,
+			"commit":              buildinfo.Commit,
+			"build_time":          buildinfo.BuildTime,
+			"self_update_enabled": s.selfUpdater != nil,
+		})
 	})
 
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
 	s.engine.POST("/v1/feedback/issues/:issueNumber/comments", s.handleCreateIssueComment)
+	if s.selfUpdater != nil {
+		s.engine.POST("/v1/admin/self-update", s.handleSelfUpdate)
+		s.engine.GET("/v1/admin/self-update/status", s.handleSelfUpdateStatus)
+	}
 }
 
 func (s *Server) handleChallenge(c *gin.Context) {
@@ -544,6 +558,53 @@ func (s *Server) loadIssueStatus(ctx context.Context, issueNumber int) (github.I
 	}
 	s.statusCache.Set(issue)
 	return issue, nil
+}
+
+func (s *Server) handleSelfUpdate(c *gin.Context) {
+	if s.selfUpdater == nil {
+		writeError(c, http.StatusNotFound, "自动更新未启用")
+		return
+	}
+	if !s.selfUpdater.isAuthorized(c.Request) {
+		writeError(c, http.StatusForbidden, "自动更新鉴权失败")
+		return
+	}
+
+	var req selfUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, "自动更新请求体无效")
+		return
+	}
+
+	result, err := s.selfUpdater.applyRelease(c.Request.Context(), req.Tag, req.Force)
+	if err != nil {
+		if errors.Is(err, errSelfUpdateBusy) {
+			writeError(c, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(c, http.StatusBadGateway, fmt.Sprintf("自动更新失败: %v", err))
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"success": true,
+		"result":  result,
+	})
+}
+
+func (s *Server) handleSelfUpdateStatus(c *gin.Context) {
+	if s.selfUpdater == nil {
+		writeError(c, http.StatusNotFound, "自动更新未启用")
+		return
+	}
+	if !s.selfUpdater.isAuthorized(c.Request) {
+		writeError(c, http.StatusForbidden, "自动更新鉴权失败")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"status":  s.selfUpdater.statusSnapshot(),
+	})
 }
 
 func (s *Server) validateTicketToken(issueNumber int, ticketToken string) bool {

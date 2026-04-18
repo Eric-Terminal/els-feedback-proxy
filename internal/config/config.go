@@ -14,6 +14,12 @@ type Config struct {
 	GitHubToken             string
 	GitHubOwner             string
 	GitHubRepo              string
+	SelfUpdateSecret        string
+	SelfUpdateRepoOwner     string
+	SelfUpdateRepoName      string
+	SelfUpdateGitHubToken   string
+	SelfUpdateServiceName   string
+	SelfUpdateWorkingDir    string
 	GitHubTokenLogin        string
 	DeveloperLogins         []string
 	DataDir                 string
@@ -50,6 +56,12 @@ func Load() (Config, error) {
 		GitHubToken:             os.Getenv("GITHUB_TOKEN"),
 		GitHubOwner:             getEnv("GITHUB_OWNER", "Eric-Terminal"),
 		GitHubRepo:              getEnv("GITHUB_REPO", "ETOS-LLM-Studio"),
+		SelfUpdateSecret:        strings.TrimSpace(os.Getenv("SELF_UPDATE_SECRET")),
+		SelfUpdateRepoOwner:     getEnv("SELF_UPDATE_REPO_OWNER", "Eric-Terminal"),
+		SelfUpdateRepoName:      getEnv("SELF_UPDATE_REPO_NAME", "els-feedback-proxy"),
+		SelfUpdateGitHubToken:   strings.TrimSpace(os.Getenv("SELF_UPDATE_GITHUB_TOKEN")),
+		SelfUpdateServiceName:   getEnv("SELF_UPDATE_SERVICE_NAME", "els-feedback-proxy"),
+		SelfUpdateWorkingDir:    strings.TrimSpace(os.Getenv("SELF_UPDATE_WORKING_DIR")),
 		GitHubTokenLogin:        strings.TrimSpace(os.Getenv("GITHUB_TOKEN_LOGIN")),
 		DeveloperLogins:         getEnvAsStringSlice("DEVELOPER_GITHUB_LOGINS"),
 		DataDir:                 getEnv("DATA_DIR", "./data"),

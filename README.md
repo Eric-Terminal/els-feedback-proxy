@@ -8,6 +8,8 @@
 - `POST /v1/feedback/issues/:issue_number/comments`：在指定工单下发送评论（同样经过签名与 LLM 审核）
 - `GET /v1/feedback/issues/:issue_number`：校验 ticket token 后返回过滤后的状态与公开评论
 - `GET /v1/healthz`：健康检查
+- `POST /v1/admin/self-update`：受保护的自更新 webhook，下载指定 tag 的 Release 产物并替换当前二进制
+- `GET /v1/admin/self-update/status`：查看自动更新器状态（同样需要鉴权）
 
 ## 安全策略（方案B）
 - UA 校验：必须包含 `ETOS LLM Studio`（兼容 `%20` 编码）
@@ -51,6 +53,12 @@
 - `REDIS_DB`：Redis DB（默认 `0`）
 - `REDIS_KEY_PREFIX`：Redis Key 前缀（默认 `els-feedback`）
 - `COMMENT_LIMIT_PER_WINDOW`：评论限流（默认 `20`，每 15 分钟）
+- `SELF_UPDATE_SECRET`：自动更新 webhook 密钥；留空则禁用自动更新接口
+- `SELF_UPDATE_REPO_OWNER`：自动更新下载源仓库 owner（默认 `Eric-Terminal`）
+- `SELF_UPDATE_REPO_NAME`：自动更新下载源仓库名（默认 `els-feedback-proxy`）
+- `SELF_UPDATE_GITHUB_TOKEN`：自动更新读取 Release 时使用的 GitHub Token（可选，公开仓库可不填）
+- `SELF_UPDATE_SERVICE_NAME`：更新完成后重启的 systemd 服务名（默认 `els-feedback-proxy`）
+- `SELF_UPDATE_WORKING_DIR`：自动更新工作目录（可选，默认取当前可执行文件所在目录）
 
 当配置 `REDIS_ADDR` 且可连通时，限流与去重会自动升级为 Redis 全局模式；连接失败会自动回退到内存模式。
 
@@ -74,6 +82,28 @@ docker run --rm -p 8080:8080 \
 ```bash
 docker compose up -d --build
 ```
+
+## 自动发布与自动更新
+推荐链路：
+
+1. 本仓库 push 新 tag，例如 `v0.1.4`
+2. GitHub Actions 运行测试并通过 GoReleaser 生成 Release 资产
+3. Workflow 向生产环境 `POST /v1/admin/self-update`
+4. 服务端根据 tag 调用 GitHub Releases API，自动下载适用于当前机器的 `linux_amd64` 归档与 `checksums.txt`
+5. 服务端校验 SHA256、备份当前二进制、原地替换并调度 `systemctl restart`
+
+这样服务器不需要安装 Go 工具链，也不会在生产机上重新编译。
+
+### GitHub Actions Secrets
+- `DEPLOY_WEBHOOK_URL`：生产 webhook 地址，例如 `https://feedback.els.ericterminal.com/v1/admin/self-update`
+- `DEPLOY_WEBHOOK_SECRET`：与服务器 `SELF_UPDATE_SECRET` 相同的密钥
+
+### 健康检查返回
+`GET /v1/healthz` 现在会额外返回：
+- `version`
+- `commit`
+- `build_time`
+- `self_update_enabled`
 
 ## 客户端签名串
 提交反馈时签名文本格式：

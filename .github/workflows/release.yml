@@ -23,6 +23,9 @@ jobs:
           go-version: '1.22'
           cache: true
 
+      - name: Run Tests
+        run: go test ./...
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -31,3 +34,16 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Production Deploy Webhook
+        if: ${{ secrets.DEPLOY_WEBHOOK_URL != '' && secrets.DEPLOY_WEBHOOK_SECRET != '' }}
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          curl --fail-with-body --retry 5 --retry-all-errors --max-time 30 \
+            -X POST "$DEPLOY_WEBHOOK_URL" \
+            -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
+            -H "Content-Type: application/json" \
+            --data "{\"tag\":\"$RELEASE_TAG\"}"

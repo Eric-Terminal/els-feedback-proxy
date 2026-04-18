@@ -10,6 +10,8 @@ builds:
       - CGO_ENABLED=0
     main: ./cmd/server
     binary: els-feedback-proxy
+    ldflags:
+      - -s -w -X els-feedback-proxy/internal/buildinfo.Version={{ .Version }} -X els-feedback-proxy/internal/buildinfo.Commit={{ .Commit }} -X els-feedback-proxy/internal/buildinfo.BuildTime={{ .Date }}
     goos:
       - linux
       - darwin

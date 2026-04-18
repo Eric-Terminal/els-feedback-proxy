@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"els-feedback-proxy/internal/api"
+	"els-feedback-proxy/internal/buildinfo"
 	"els-feedback-proxy/internal/config"
 	"els-feedback-proxy/internal/github"
 	"els-feedback-proxy/internal/moderation"
@@ -94,7 +95,13 @@ func main() {
 
 	srv := api.NewServer(cfg, ghClient, limiter, dedupe, challenges, ticketStore, reviewer, blockedArchiveStore)
 
-	log.Printf("ELS Feedback Proxy 启动: :%s", cfg.Port)
+	log.Printf(
+		"ELS Feedback Proxy 启动: :%s (version=%s commit=%s build_time=%s)",
+		cfg.Port,
+		buildinfo.Version,
+		buildinfo.Commit,
+		buildinfo.BuildTime,
+	)
 	if err := srv.Run(); err != nil {
 		log.Fatalf("服务异常退出: %v", err)
 	}
