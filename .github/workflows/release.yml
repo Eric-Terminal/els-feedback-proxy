@@ -36,12 +36,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify Production Deploy Webhook
-        if: ${{ secrets.DEPLOY_WEBHOOK_URL != '' && secrets.DEPLOY_WEBHOOK_SECRET != '' }}
         env:
           DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
           DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          if [ -z "${DEPLOY_WEBHOOK_URL}" ] || [ -z "${DEPLOY_WEBHOOK_SECRET}" ]; then
+            echo "Deploy webhook secrets are not configured. Skipping deploy notification."
+            exit 0
+          fi
           curl --fail-with-body --retry 5 --retry-all-errors --max-time 30 \
             -X POST "$DEPLOY_WEBHOOK_URL" \
             -H "Authorization: Bearer $DEPLOY_WEBHOOK_SECRET" \
