@@ -27,16 +27,17 @@ import (
 
 // Server HTTP 服务封装
 type Server struct {
-	cfg        config.Config
-	gh         githubGateway
-	limiter    rateLimiter
-	dedupe     duplicateDetector
-	challenges *security.ChallengeManager
-	tickets    *store.TicketStore
-	reviewer   moderation.Reviewer
-	archives   *store.BlockedArchiveStore
-	developers map[string]struct{}
-	engine     *gin.Engine
+	cfg         config.Config
+	gh          githubGateway
+	limiter     rateLimiter
+	dedupe      duplicateDetector
+	statusCache *issueStatusCache
+	challenges  *security.ChallengeManager
+	tickets     *store.TicketStore
+	reviewer    moderation.Reviewer
+	archives    *store.BlockedArchiveStore
+	developers  map[string]struct{}
+	engine      *gin.Engine
 }
 
 type githubGateway interface {
@@ -70,16 +71,17 @@ func NewServer(
 	}
 
 	server := &Server{
-		cfg:        cfg,
-		gh:         gh,
-		limiter:    limiter,
-		dedupe:     dedupe,
-		challenges: challenges,
-		tickets:    tickets,
-		reviewer:   reviewer,
-		archives:   archives,
-		developers: buildDeveloperLoginSet(cfg),
-		engine:     gin.New(),
+		cfg:         cfg,
+		gh:          gh,
+		limiter:     limiter,
+		dedupe:      dedupe,
+		statusCache: newIssueStatusCache(time.Hour),
+		challenges:  challenges,
+		tickets:     tickets,
+		reviewer:    reviewer,
+		archives:    archives,
+		developers:  buildDeveloperLoginSet(cfg),
+		engine:      gin.New(),
 	}
 
 	server.engine.Use(gin.Recovery())
@@ -290,12 +292,6 @@ func (s *Server) handleGetIssueStatus(c *gin.Context) {
 		return
 	}
 
-	clientIP := c.ClientIP()
-	if !s.allowRate("query", clientIP, s.cfg.QueryLimitPerWindow) {
-		writeError(c, http.StatusTooManyRequests, "查询过于频繁")
-		return
-	}
-
 	issueNumber, err := parseIssueNumber(c.Param("issueNumber"))
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "issue_number 无效")
@@ -307,7 +303,7 @@ func (s *Server) handleGetIssueStatus(c *gin.Context) {
 		return
 	}
 
-	issue, err := s.gh.GetIssueStatus(c.Request.Context(), issueNumber)
+	issue, err := s.loadIssueStatus(c.Request.Context(), issueNumber)
 	if err != nil {
 		writeError(c, http.StatusBadGateway, fmt.Sprintf("GitHub 查询失败: %v", err))
 		return
@@ -492,6 +488,7 @@ func (s *Server) handleCreateIssueComment(c *gin.Context) {
 			"is_developer": s.isDeveloperLogin(createdComment.Author),
 		}
 		c.JSON(statusCode, response)
+		s.statusCache.Delete(issueNumber)
 		return
 	}
 
@@ -508,6 +505,7 @@ func (s *Server) handleCreateIssueComment(c *gin.Context) {
 		"created_at":   createdComment.CreatedAt.UTC().Format(time.RFC3339),
 		"is_developer": s.isDeveloperLogin(createdComment.Author),
 	}
+	s.statusCache.Delete(issueNumber)
 	c.JSON(statusCode, response)
 }
 
@@ -533,6 +531,19 @@ func (s *Server) allowRate(action, clientIP string, limit int) bool {
 func (s *Server) dedupeKey(clientIP string, req SubmitIssueRequest) string {
 	input := strings.Join([]string{clientIP, req.Type, req.Title, req.Detail}, "|")
 	return hashString(input)
+}
+
+func (s *Server) loadIssueStatus(ctx context.Context, issueNumber int) (github.IssueStatus, error) {
+	if cached, ok := s.statusCache.Get(issueNumber); ok {
+		return cached, nil
+	}
+
+	issue, err := s.gh.GetIssueStatus(ctx, issueNumber)
+	if err != nil {
+		return github.IssueStatus{}, err
+	}
+	s.statusCache.Set(issue)
+	return issue, nil
 }
 
 func (s *Server) validateTicketToken(issueNumber int, ticketToken string) bool {
