@@ -30,6 +30,7 @@ const (
 	selfUpdateStateFileName = ".self-update-state.json"
 	selfUpdateAPIBaseURL    = "https://api.github.com"
 	selfUpdateJobTimeout    = 10 * time.Minute
+	selfUpdateMaxAttempts   = 4
 )
 
 var errSelfUpdateBusy = errors.New("自动更新正在进行中")
@@ -403,26 +404,43 @@ func (u *selfUpdateManager) selectChecksumsAsset(assets []githubReleaseAsset) (g
 }
 
 func (u *selfUpdateManager) download(ctx context.Context, downloadURL string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("创建下载请求失败: %w", err)
-	}
-	request.Header.Set("User-Agent", "ELS-Feedback-Proxy-SelfUpdate")
-	if u.githubToken != "" && strings.Contains(downloadURL, "github.com") {
-		request.Header.Set("Authorization", "Bearer "+u.githubToken)
+	var lastErr error
+
+	for attempt := 1; attempt <= selfUpdateMaxAttempts; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("创建下载请求失败: %w", err)
+		}
+		request.Header.Set("User-Agent", "ELS-Feedback-Proxy-SelfUpdate")
+		if u.githubToken != "" && strings.Contains(downloadURL, "github.com") {
+			request.Header.Set("Authorization", "Bearer "+u.githubToken)
+		}
+
+		response, err := u.httpClient.Do(request)
+		if err != nil {
+			lastErr = fmt.Errorf("下载请求失败: %w", err)
+			if !shouldRetrySelfUpdateAttempt(ctx, attempt) {
+				return nil, lastErr
+			}
+			continue
+		}
+
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			return body, nil
+		}
+
+		lastErr = fmt.Errorf("下载失败: HTTP %d, body=%s", response.StatusCode, string(body))
+		if !shouldRetrySelfUpdateHTTPStatus(response.StatusCode) || !shouldRetrySelfUpdateAttempt(ctx, attempt) {
+			return nil, lastErr
+		}
 	}
 
-	response, err := u.httpClient.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("下载请求失败: %w", err)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("下载失败: 未知错误")
 	}
-	defer response.Body.Close()
-
-	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("下载失败: HTTP %d, body=%s", response.StatusCode, string(body))
-	}
-	return body, nil
+	return nil, lastErr
 }
 
 func (u *selfUpdateManager) installRelease(tag, archiveName string, archiveBytes []byte, binaryBytes []byte) (archivePath string, backupPath string, err error) {
@@ -564,4 +582,25 @@ func scheduleSystemdRestart(serviceName string, delay time.Duration) error {
 
 	command := fmt.Sprintf("nohup /bin/sh -c 'sleep %d; systemctl restart %s' >/dev/null 2>&1 &", delaySeconds, serviceName)
 	return exec.Command("/bin/sh", "-c", command).Run()
+}
+
+func shouldRetrySelfUpdateHTTPStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func shouldRetrySelfUpdateAttempt(ctx context.Context, attempt int) bool {
+	if attempt >= selfUpdateMaxAttempts {
+		return false
+	}
+
+	delay := time.Duration(attempt) * time.Second
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

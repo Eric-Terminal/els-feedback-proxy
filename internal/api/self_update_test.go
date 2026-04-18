@@ -243,6 +243,80 @@ func TestSelfUpdaterStartReleaseRunsInBackgroundAndTracksStatus(t *testing.T) {
 	}
 }
 
+func TestSelfUpdaterApplyReleaseRetriesTransientDownloadFailure(t *testing.T) {
+	workdir := t.TempDir()
+	binaryPath := filepath.Join(workdir, "els-feedback-proxy")
+	if err := os.WriteFile(binaryPath, []byte("old-binary"), 0o755); err != nil {
+		t.Fatalf("写入旧二进制失败: %v", err)
+	}
+
+	newBinary := []byte("new-binary")
+	archiveBytes := makeTarGzArchive(t, "els-feedback-proxy", newBinary)
+	checksum := sha256Hex(archiveBytes)
+
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	archiveAttempts := 0
+	mux.HandleFunc("/repos/Eric-Terminal/els-feedback-proxy/releases/tags/v1.2.4", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(githubRelease{
+			TagName: "v1.2.4",
+			HTMLURL: "https://github.com/Eric-Terminal/els-feedback-proxy/releases/tag/v1.2.4",
+			Assets: []githubReleaseAsset{
+				{
+					Name:               "checksums.txt",
+					BrowserDownloadURL: server.URL + "/download/checksums",
+				},
+				{
+					Name:               "els-feedback-proxy_1.2.4_linux_amd64.tar.gz",
+					BrowserDownloadURL: server.URL + "/download/archive",
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/download/checksums", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(checksum + "  els-feedback-proxy_1.2.4_linux_amd64.tar.gz\n"))
+	})
+	mux.HandleFunc("/download/archive", func(w http.ResponseWriter, r *http.Request) {
+		archiveAttempts++
+		if archiveAttempts < 3 {
+			http.Error(w, "gateway timeout", http.StatusGatewayTimeout)
+			return
+		}
+		_, _ = w.Write(archiveBytes)
+	})
+
+	updater := &selfUpdateManager{
+		secret:        "secret",
+		repoOwner:     "Eric-Terminal",
+		repoName:      "els-feedback-proxy",
+		serviceName:   "els-feedback-proxy",
+		workdir:       workdir,
+		binaryName:    "els-feedback-proxy",
+		stateFile:     filepath.Join(workdir, selfUpdateStateFileName),
+		httpClient:    server.Client(),
+		apiBaseURL:    server.URL,
+		now:           time.Now,
+		runtimeGOOS:   "linux",
+		runtimeGOARCH: "amd64",
+		scheduleRestart: func(serviceName string, delay time.Duration) error {
+			return nil
+		},
+	}
+
+	result, err := updater.applyRelease(context.Background(), "v1.2.4", false)
+	if err != nil {
+		t.Fatalf("期望重试后成功，实际错误: %v", err)
+	}
+	if result.Tag != "v1.2.4" {
+		t.Fatalf("期望更新到 v1.2.4，实际=%s", result.Tag)
+	}
+	if archiveAttempts != 3 {
+		t.Fatalf("期望尝试 3 次下载，实际=%d", archiveAttempts)
+	}
+}
+
 func makeTarGzArchive(t *testing.T, fileName string, content []byte) []byte {
 	t.Helper()
 
