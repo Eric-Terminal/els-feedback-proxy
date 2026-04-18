@@ -14,6 +14,7 @@ type Config struct {
 	GitHubToken             string
 	GitHubOwner             string
 	GitHubRepo              string
+	GitHubWebhookSecret     string
 	SelfUpdateSecret        string
 	SelfUpdateRepoOwner     string
 	SelfUpdateRepoName      string
@@ -56,6 +57,7 @@ func Load() (Config, error) {
 		GitHubToken:             os.Getenv("GITHUB_TOKEN"),
 		GitHubOwner:             getEnv("GITHUB_OWNER", "Eric-Terminal"),
 		GitHubRepo:              getEnv("GITHUB_REPO", "ETOS-LLM-Studio"),
+		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
 		SelfUpdateSecret:        strings.TrimSpace(os.Getenv("SELF_UPDATE_SECRET")),
 		SelfUpdateRepoOwner:     getEnv("SELF_UPDATE_REPO_OWNER", "Eric-Terminal"),
 		SelfUpdateRepoName:      getEnv("SELF_UPDATE_REPO_NAME", "els-feedback-proxy"),

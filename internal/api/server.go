@@ -33,13 +33,19 @@ type Server struct {
 	limiter     rateLimiter
 	dedupe      duplicateDetector
 	statusCache *issueStatusCache
-	selfUpdater *selfUpdateManager
+	selfUpdater selfUpdateController
 	challenges  *security.ChallengeManager
 	tickets     *store.TicketStore
 	reviewer    moderation.Reviewer
 	archives    *store.BlockedArchiveStore
 	developers  map[string]struct{}
 	engine      *gin.Engine
+}
+
+type selfUpdateController interface {
+	isAuthorized(r *http.Request) bool
+	statusSnapshot() map[string]any
+	startRelease(rawTag string, force bool) (selfUpdateDispatchResult, error)
 }
 
 type githubGateway interface {
@@ -100,12 +106,13 @@ func (s *Server) Run() error {
 func (s *Server) registerRoutes() {
 	s.engine.GET("/v1/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"ok":                  true,
-			"time":                time.Now().UTC().Format(time.RFC3339),
-			"version":             buildinfo.Version,
-			"commit":              buildinfo.Commit,
-			"build_time":          buildinfo.BuildTime,
-			"self_update_enabled": s.selfUpdater != nil,
+			"ok":                     true,
+			"time":                   time.Now().UTC().Format(time.RFC3339),
+			"version":                buildinfo.Version,
+			"commit":                 buildinfo.Commit,
+			"build_time":             buildinfo.BuildTime,
+			"self_update_enabled":    s.selfUpdater != nil,
+			"github_webhook_enabled": s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "",
 		})
 	})
 
@@ -113,6 +120,9 @@ func (s *Server) registerRoutes() {
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
 	s.engine.POST("/v1/feedback/issues/:issueNumber/comments", s.handleCreateIssueComment)
+	if s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "" {
+		s.engine.POST("/v1/github/webhooks", s.handleGitHubWebhook)
+	}
 	if s.selfUpdater != nil {
 		s.engine.POST("/v1/admin/self-update", s.handleSelfUpdate)
 		s.engine.GET("/v1/admin/self-update/status", s.handleSelfUpdateStatus)
