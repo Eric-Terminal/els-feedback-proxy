@@ -58,6 +58,9 @@ func renderIssueBody(req SubmitIssueRequest, clientIPHash string) string {
 	builder.WriteString("## 环境信息\n")
 	builder.WriteString(fmt.Sprintf("- 平台: %s\n", req.Environment.Platform))
 	builder.WriteString(fmt.Sprintf("- App 版本: %s (Build %s)\n", req.Environment.AppVersion, req.Environment.AppBuild))
+	if req.Environment.GitCommitHash != "" {
+		builder.WriteString(fmt.Sprintf("- Git 提交: %s\n", req.Environment.GitCommitHash))
+	}
 	builder.WriteString(fmt.Sprintf("- 系统版本: %s\n", req.Environment.OSVersion))
 	builder.WriteString(fmt.Sprintf("- 设备型号: %s\n", req.Environment.DeviceModel))
 	builder.WriteString(fmt.Sprintf("- 语言: %s\n", req.Environment.LocaleIdentifier))
@@ -174,6 +177,9 @@ func renderBlockedArchiveMarkdown(
 	builder.WriteString("## 环境信息\n")
 	builder.WriteString(fmt.Sprintf("- 平台: %s\n", req.Environment.Platform))
 	builder.WriteString(fmt.Sprintf("- App 版本: %s (Build %s)\n", req.Environment.AppVersion, req.Environment.AppBuild))
+	if req.Environment.GitCommitHash != "" {
+		builder.WriteString(fmt.Sprintf("- Git 提交: %s\n", req.Environment.GitCommitHash))
+	}
 	builder.WriteString(fmt.Sprintf("- 系统版本: %s\n", req.Environment.OSVersion))
 	builder.WriteString(fmt.Sprintf("- 设备型号: %s\n", req.Environment.DeviceModel))
 	builder.WriteString(fmt.Sprintf("- 语言: %s\n", req.Environment.LocaleIdentifier))

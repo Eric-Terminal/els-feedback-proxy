@@ -25,6 +25,7 @@ type EnvironmentSnapshot struct {
 	Platform           string `json:"platform"`
 	AppVersion         string `json:"appVersion"`
 	AppBuild           string `json:"appBuild"`
+	GitCommitHash      string `json:"gitCommitHash"`
 	OSVersion          string `json:"osVersion"`
 	DeviceModel        string `json:"deviceModel"`
 	LocaleIdentifier   string `json:"localeIdentifier"`
@@ -42,6 +43,7 @@ func (r *SubmitIssueRequest) Normalize() {
 	r.Environment.Platform = strings.TrimSpace(strings.ToLower(r.Environment.Platform))
 	r.Environment.AppVersion = strings.TrimSpace(r.Environment.AppVersion)
 	r.Environment.AppBuild = strings.TrimSpace(r.Environment.AppBuild)
+	r.Environment.GitCommitHash = strings.TrimSpace(r.Environment.GitCommitHash)
 	r.Environment.OSVersion = strings.TrimSpace(r.Environment.OSVersion)
 	r.Environment.DeviceModel = strings.TrimSpace(r.Environment.DeviceModel)
 	r.Environment.LocaleIdentifier = strings.TrimSpace(r.Environment.LocaleIdentifier)

@@ -17,6 +17,7 @@ func TestRenderIssueBodyContainsAutoUpdateMarker(t *testing.T) {
 			Platform:           "ios",
 			AppVersion:         "1.0.0",
 			AppBuild:           "100",
+			GitCommitHash:      "abcdef1234567890",
 			OSVersion:          "iOS 18",
 			DeviceModel:        "iPhone",
 			LocaleIdentifier:   "zh_Hans",
@@ -27,6 +28,9 @@ func TestRenderIssueBodyContainsAutoUpdateMarker(t *testing.T) {
 	body := renderIssueBody(req, "ip-hash")
 	if !strings.Contains(body, "由用户提出自动更新的") {
 		t.Fatalf("Issue Markdown 缺少自动更新标记，body=%s", body)
+	}
+	if !strings.Contains(body, "Git 提交: abcdef1234567890") {
+		t.Fatalf("Issue Markdown 缺少 Git 提交哈希，body=%s", body)
 	}
 }
 
@@ -45,6 +49,12 @@ func TestRenderBlockedArchiveMarkdownContainsOriginalText(t *testing.T) {
 		Type:   "bug",
 		Title:  "标题A",
 		Detail: "详细描述B",
+		Environment: EnvironmentSnapshot{
+			Platform:      "watchos",
+			AppVersion:    "2.0.0",
+			AppBuild:      "200",
+			GitCommitHash: "1234567deadbeef",
+		},
 	}
 	md := renderBlockedArchiveMarkdown("archive-xyz", "ip-hash", req, moderation.Decision{
 		Allow:      false,
@@ -54,6 +64,9 @@ func TestRenderBlockedArchiveMarkdownContainsOriginalText(t *testing.T) {
 	}, nil, testNow())
 	if !strings.Contains(md, "标题A") || !strings.Contains(md, "详细描述B") {
 		t.Fatalf("留档应包含原始反馈内容")
+	}
+	if !strings.Contains(md, "Git 提交: 1234567deadbeef") {
+		t.Fatalf("留档应包含 Git 提交哈希，md=%s", md)
 	}
 }
 
