@@ -51,14 +51,15 @@ type CreateCommentResult struct {
 }
 
 type IssueStatus struct {
-	Number    int
-	Title     string
-	Body      string
-	State     string
-	Labels    []string
-	UpdatedAt time.Time
-	URL       string
-	Comments  []IssueComment
+	Number         int
+	Title          string
+	Body           string
+	State          string
+	Labels         []string
+	UpdatedAt      time.Time
+	URL            string
+	Comments       []IssueComment
+	TimelineEvents []IssueTimelineEvent
 }
 
 type IssueComment struct {
@@ -66,6 +67,24 @@ type IssueComment struct {
 	Author    string
 	Body      string
 	CreatedAt time.Time
+}
+
+type IssueTimelineEvent struct {
+	ID        int64
+	Type      string
+	Actor     string
+	CreatedAt time.Time
+	Commit    *ReferencedCommit
+}
+
+type ReferencedCommit struct {
+	SHA             string
+	ShortSHA        string
+	MessageHeadline string
+	Message         string
+	HTMLURL         string
+	CommittedAt     time.Time
+	Verified        bool
 }
 
 func (c *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (CreateIssueResult, error) {
@@ -219,6 +238,7 @@ func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStat
 			Name string `json:"name"`
 		} `json:"labels"`
 		CommentsURL string `json:"comments_url"`
+		TimelineURL string `json:"timeline_url"`
 	}
 
 	if err := json.Unmarshal(data, &issue); err != nil {
@@ -242,15 +262,18 @@ func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStat
 		return IssueStatus{}, err
 	}
 
+	timelineEvents, _ := c.fetchReferencedTimelineEvents(ctx, issue.TimelineURL)
+
 	return IssueStatus{
-		Number:    issue.Number,
-		Title:     issue.Title,
-		Body:      issue.Body,
-		State:     issue.State,
-		Labels:    labels,
-		UpdatedAt: updatedAt,
-		URL:       issue.HTMLURL,
-		Comments:  comments,
+		Number:         issue.Number,
+		Title:          issue.Title,
+		Body:           issue.Body,
+		State:          issue.State,
+		Labels:         labels,
+		UpdatedAt:      updatedAt,
+		URL:            issue.HTMLURL,
+		Comments:       comments,
+		TimelineEvents: timelineEvents,
 	}, nil
 }
 
@@ -315,6 +338,178 @@ func (c *Client) fetchComments(ctx context.Context, endpoint string) ([]IssueCom
 	}
 
 	return comments, nil
+}
+
+func (c *Client) fetchReferencedTimelineEvents(ctx context.Context, endpoint string) ([]IssueTimelineEvent, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return []IssueTimelineEvent{}, nil
+	}
+
+	events := make([]IssueTimelineEvent, 0, 8)
+	for page := 1; page <= 10; page++ {
+		requestURL, err := appendPagination(endpoint, page, 100)
+		if err != nil {
+			return nil, err
+		}
+
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("创建 timeline 请求失败: %w", err)
+		}
+		c.fillHeaders(request)
+
+		response, err := c.httpClient.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("调用 GitHub timeline 失败: %w", err)
+		}
+
+		data, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return nil, fmt.Errorf("GitHub timeline 失败: HTTP %d, body=%s", response.StatusCode, string(data))
+		}
+
+		var raw []struct {
+			ID        int64  `json:"id"`
+			Event     string `json:"event"`
+			CommitID  string `json:"commit_id"`
+			CommitURL string `json:"commit_url"`
+			CreatedAt string `json:"created_at"`
+			Actor     struct {
+				Login string `json:"login"`
+			} `json:"actor"`
+		}
+
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("解析 timeline 响应失败: %w", err)
+		}
+
+		for _, item := range raw {
+			if item.Event != "referenced" || strings.TrimSpace(item.CommitID) == "" {
+				continue
+			}
+
+			createdAt, err := time.Parse(time.RFC3339, item.CreatedAt)
+			if err != nil {
+				createdAt = time.Now()
+			}
+
+			commit, err := c.fetchCommit(ctx, item.CommitURL, item.CommitID)
+			if err != nil {
+				commit = ReferencedCommit{
+					SHA:      strings.TrimSpace(item.CommitID),
+					ShortSHA: shortSHA(item.CommitID),
+					HTMLURL:  c.commitHTMLURL(item.CommitID),
+				}
+			}
+			if commit.CommittedAt.IsZero() {
+				commit.CommittedAt = createdAt
+			}
+
+			events = append(events, IssueTimelineEvent{
+				ID:        item.ID,
+				Type:      "referenced_commit",
+				Actor:     strings.TrimSpace(item.Actor.Login),
+				CreatedAt: createdAt,
+				Commit:    &commit,
+			})
+		}
+
+		if len(raw) < 100 {
+			break
+		}
+	}
+
+	return events, nil
+}
+
+func (c *Client) fetchCommit(ctx context.Context, endpoint string, fallbackSHA string) (ReferencedCommit, error) {
+	requestURL := strings.TrimSpace(endpoint)
+	if requestURL == "" {
+		requestURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s", c.owner, c.repo, fallbackSHA)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return ReferencedCommit{}, fmt.Errorf("创建 commit 请求失败: %w", err)
+	}
+	c.fillHeaders(request)
+
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return ReferencedCommit{}, fmt.Errorf("调用 GitHub commit 失败: %w", err)
+	}
+	defer response.Body.Close()
+
+	data, _ := io.ReadAll(response.Body)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return ReferencedCommit{}, fmt.Errorf("GitHub commit 失败: HTTP %d, body=%s", response.StatusCode, string(data))
+	}
+
+	var payload struct {
+		SHA     string `json:"sha"`
+		HTMLURL string `json:"html_url"`
+		Commit  struct {
+			Message string `json:"message"`
+			Author  struct {
+				Date string `json:"date"`
+			} `json:"author"`
+			Verification struct {
+				Verified bool `json:"verified"`
+			} `json:"verification"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return ReferencedCommit{}, fmt.Errorf("解析 commit 响应失败: %w", err)
+	}
+
+	sha := strings.TrimSpace(payload.SHA)
+	if sha == "" {
+		sha = strings.TrimSpace(fallbackSHA)
+	}
+
+	committedAt, _ := time.Parse(time.RFC3339, payload.Commit.Author.Date)
+	return ReferencedCommit{
+		SHA:             sha,
+		ShortSHA:        shortSHA(sha),
+		MessageHeadline: firstLine(payload.Commit.Message),
+		Message:         payload.Commit.Message,
+		HTMLURL:         fallbackString(payload.HTMLURL, c.commitHTMLURL(sha)),
+		CommittedAt:     committedAt,
+		Verified:        payload.Commit.Verification.Verified,
+	}, nil
+}
+
+func (c *Client) commitHTMLURL(sha string) string {
+	trimmed := strings.TrimSpace(sha)
+	if trimmed == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/%s/commit/%s", c.owner, c.repo, trimmed)
+}
+
+func shortSHA(sha string) string {
+	trimmed := strings.TrimSpace(sha)
+	if len(trimmed) <= 7 {
+		return trimmed
+	}
+	return trimmed[:7]
+}
+
+func firstLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(lines[0])
+}
+
+func fallbackString(value string, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed != "" {
+		return trimmed
+	}
+	return fallback
 }
 
 func appendPagination(endpoint string, page int, perPage int) (string, error) {

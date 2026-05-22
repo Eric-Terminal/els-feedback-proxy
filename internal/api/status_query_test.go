@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,23 @@ func TestHandleGetIssueStatusDoesNotUseRateLimitAndCachesOneHour(t *testing.T) {
 			Labels:    []string{"status/in-progress", "source/app-feedback"},
 			UpdatedAt: time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC),
 			URL:       "https://github.com/example/repo/issues/42",
+			TimelineEvents: []github.IssueTimelineEvent{
+				{
+					ID:        99,
+					Type:      "referenced_commit",
+					Actor:     "Eric-Terminal",
+					CreatedAt: time.Date(2026, 4, 19, 12, 10, 0, 0, time.UTC),
+					Commit: &github.ReferencedCommit{
+						SHA:             "abcdef1234567890",
+						ShortSHA:        "abcdef1",
+						MessageHeadline: "fix(#42): 修复反馈问题",
+						Message:         "fix(#42): 修复反馈问题",
+						HTMLURL:         "https://github.com/example/repo/commit/abcdef1234567890",
+						CommittedAt:     time.Date(2026, 4, 19, 12, 9, 0, 0, time.UTC),
+						Verified:        true,
+					},
+				},
+			},
 		},
 	}
 
@@ -95,6 +113,11 @@ func TestHandleGetIssueStatusDoesNotUseRateLimitAndCachesOneHour(t *testing.T) {
 	}
 	if gh.getIssueCallCount != 1 {
 		t.Fatalf("第一次查询应调用一次 GitHub，实际=%d", gh.getIssueCallCount)
+	}
+	if !strings.Contains(responseOne.Body.String(), `"timeline_events"`) ||
+		!strings.Contains(responseOne.Body.String(), `"referenced_commit"`) ||
+		!strings.Contains(responseOne.Body.String(), `"short_sha":"abcdef1"`) {
+		t.Fatalf("状态响应应包含 referenced commit 动态，body=%s", responseOne.Body.String())
 	}
 
 	requestTwo := httptest.NewRequest(http.MethodGet, "/v1/feedback/issues/42?ticket_token=token-42", nil)

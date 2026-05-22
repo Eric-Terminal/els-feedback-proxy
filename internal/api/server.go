@@ -343,20 +343,42 @@ func (s *Server) handleGetIssueStatus(c *gin.Context) {
 			"is_developer": s.isDeveloperLogin(comment.Author),
 		})
 	}
+	timelineEvents := make([]gin.H, 0, len(issue.TimelineEvents))
+	for _, event := range issue.TimelineEvents {
+		item := gin.H{
+			"id":         fmt.Sprintf("%d", event.ID),
+			"type":       event.Type,
+			"actor":      event.Actor,
+			"created_at": event.CreatedAt.UTC().Format(time.RFC3339),
+		}
+		if event.Commit != nil {
+			item["commit"] = gin.H{
+				"sha":              event.Commit.SHA,
+				"short_sha":        event.Commit.ShortSHA,
+				"message_headline": event.Commit.MessageHeadline,
+				"message":          event.Commit.Message,
+				"html_url":         event.Commit.HTMLURL,
+				"committed_at":     event.Commit.CommittedAt.UTC().Format(time.RFC3339),
+				"verified":         event.Commit.Verified,
+			}
+		}
+		timelineEvents = append(timelineEvents, item)
+	}
 
 	visibleLabels := filterVisibleLabels(issue.Labels)
 	status := mapIssueStatus(issue.State, issue.Labels)
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":      true,
-		"issue_number": issue.Number,
-		"status":       status,
-		"title":        issue.Title,
-		"updated_at":   issue.UpdatedAt.UTC().Format(time.RFC3339),
-		"labels":       visibleLabels,
-		"public_url":   issue.URL,
-		"closed":       strings.EqualFold(issue.State, "closed"),
-		"comments":     comments,
+		"success":         true,
+		"issue_number":    issue.Number,
+		"status":          status,
+		"title":           issue.Title,
+		"updated_at":      issue.UpdatedAt.UTC().Format(time.RFC3339),
+		"labels":          visibleLabels,
+		"public_url":      issue.URL,
+		"closed":          strings.EqualFold(issue.State, "closed"),
+		"comments":        comments,
+		"timeline_events": timelineEvents,
 	})
 }
 
