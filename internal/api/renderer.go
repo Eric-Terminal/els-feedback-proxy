@@ -61,6 +61,7 @@ func renderIssueBody(req SubmitIssueRequest, clientIPHash string) string {
 	if req.Environment.GitCommitHash != "" {
 		builder.WriteString(fmt.Sprintf("- Git 提交: %s\n", req.Environment.GitCommitHash))
 	}
+	builder.WriteString(fmt.Sprintf("- 分发通道: %s\n", renderDistributionChannel(req.Environment.DistributionChannel)))
 	builder.WriteString(fmt.Sprintf("- 系统版本: %s\n", req.Environment.OSVersion))
 	builder.WriteString(fmt.Sprintf("- 设备型号: %s\n", req.Environment.DeviceModel))
 	builder.WriteString(fmt.Sprintf("- 语言: %s\n", req.Environment.LocaleIdentifier))
@@ -180,6 +181,7 @@ func renderBlockedArchiveMarkdown(
 	if req.Environment.GitCommitHash != "" {
 		builder.WriteString(fmt.Sprintf("- Git 提交: %s\n", req.Environment.GitCommitHash))
 	}
+	builder.WriteString(fmt.Sprintf("- 分发通道: %s\n", renderDistributionChannel(req.Environment.DistributionChannel)))
 	builder.WriteString(fmt.Sprintf("- 系统版本: %s\n", req.Environment.OSVersion))
 	builder.WriteString(fmt.Sprintf("- 设备型号: %s\n", req.Environment.DeviceModel))
 	builder.WriteString(fmt.Sprintf("- 语言: %s\n", req.Environment.LocaleIdentifier))
@@ -194,6 +196,19 @@ func renderBlockedArchiveMarkdown(
 		}
 	}
 	return builder.String()
+}
+
+func renderDistributionChannel(channel string) string {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(channel), "_", "")) {
+	case "appstore":
+		return "App Store"
+	case "testflight":
+		return "TestFlight"
+	case "":
+		return "unknown"
+	default:
+		return strings.TrimSpace(channel)
+	}
 }
 
 func renderBlockedCommentBody(archiveID, archiveFileName, moderationMessage string) string {

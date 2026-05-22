@@ -14,14 +14,15 @@ func TestRenderIssueBodyContainsAutoUpdateMarker(t *testing.T) {
 		Title:  "测试标题",
 		Detail: "测试详情",
 		Environment: EnvironmentSnapshot{
-			Platform:           "ios",
-			AppVersion:         "1.0.0",
-			AppBuild:           "100",
-			GitCommitHash:      "abcdef1234567890",
-			OSVersion:          "iOS 18",
-			DeviceModel:        "iPhone",
-			LocaleIdentifier:   "zh_Hans",
-			TimezoneIdentifier: "Asia/Shanghai",
+			Platform:            "ios",
+			AppVersion:          "1.0.0",
+			AppBuild:            "100",
+			GitCommitHash:       "abcdef1234567890",
+			DistributionChannel: "testFlight",
+			OSVersion:           "iOS 18",
+			DeviceModel:         "iPhone",
+			LocaleIdentifier:    "zh_Hans",
+			TimezoneIdentifier:  "Asia/Shanghai",
 		},
 	}
 
@@ -31,6 +32,9 @@ func TestRenderIssueBodyContainsAutoUpdateMarker(t *testing.T) {
 	}
 	if !strings.Contains(body, "Git 提交: abcdef1234567890") {
 		t.Fatalf("Issue Markdown 缺少 Git 提交哈希，body=%s", body)
+	}
+	if !strings.Contains(body, "分发通道: TestFlight") {
+		t.Fatalf("Issue Markdown 缺少分发通道，body=%s", body)
 	}
 }
 
@@ -50,10 +54,11 @@ func TestRenderBlockedArchiveMarkdownContainsOriginalText(t *testing.T) {
 		Title:  "标题A",
 		Detail: "详细描述B",
 		Environment: EnvironmentSnapshot{
-			Platform:      "watchos",
-			AppVersion:    "2.0.0",
-			AppBuild:      "200",
-			GitCommitHash: "1234567deadbeef",
+			Platform:            "watchos",
+			AppVersion:          "2.0.0",
+			AppBuild:            "200",
+			GitCommitHash:       "1234567deadbeef",
+			DistributionChannel: "appStore",
 		},
 	}
 	md := renderBlockedArchiveMarkdown("archive-xyz", "ip-hash", req, moderation.Decision{
@@ -67,6 +72,9 @@ func TestRenderBlockedArchiveMarkdownContainsOriginalText(t *testing.T) {
 	}
 	if !strings.Contains(md, "Git 提交: 1234567deadbeef") {
 		t.Fatalf("留档应包含 Git 提交哈希，md=%s", md)
+	}
+	if !strings.Contains(md, "分发通道: App Store") {
+		t.Fatalf("留档应包含分发通道，md=%s", md)
 	}
 }
 

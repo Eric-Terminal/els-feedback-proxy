@@ -22,14 +22,15 @@ type SubmitCommentRequest struct {
 
 // EnvironmentSnapshot 客户端自动采集环境
 type EnvironmentSnapshot struct {
-	Platform           string `json:"platform"`
-	AppVersion         string `json:"appVersion"`
-	AppBuild           string `json:"appBuild"`
-	GitCommitHash      string `json:"gitCommitHash"`
-	OSVersion          string `json:"osVersion"`
-	DeviceModel        string `json:"deviceModel"`
-	LocaleIdentifier   string `json:"localeIdentifier"`
-	TimezoneIdentifier string `json:"timezoneIdentifier"`
+	Platform            string `json:"platform"`
+	AppVersion          string `json:"appVersion"`
+	AppBuild            string `json:"appBuild"`
+	GitCommitHash       string `json:"gitCommitHash"`
+	DistributionChannel string `json:"distributionChannel"`
+	OSVersion           string `json:"osVersion"`
+	DeviceModel         string `json:"deviceModel"`
+	LocaleIdentifier    string `json:"localeIdentifier"`
+	TimezoneIdentifier  string `json:"timezoneIdentifier"`
 }
 
 func (r *SubmitIssueRequest) Normalize() {
@@ -44,6 +45,7 @@ func (r *SubmitIssueRequest) Normalize() {
 	r.Environment.AppVersion = strings.TrimSpace(r.Environment.AppVersion)
 	r.Environment.AppBuild = strings.TrimSpace(r.Environment.AppBuild)
 	r.Environment.GitCommitHash = strings.TrimSpace(r.Environment.GitCommitHash)
+	r.Environment.DistributionChannel = strings.TrimSpace(r.Environment.DistributionChannel)
 	r.Environment.OSVersion = strings.TrimSpace(r.Environment.OSVersion)
 	r.Environment.DeviceModel = strings.TrimSpace(r.Environment.DeviceModel)
 	r.Environment.LocaleIdentifier = strings.TrimSpace(r.Environment.LocaleIdentifier)
