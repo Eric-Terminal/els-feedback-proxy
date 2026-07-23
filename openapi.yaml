@@ -36,8 +36,13 @@ paths:
     get:
       summary: 获取全部公告管理记录
       servers:
-        - url: http://192.168.31.102:8521
-          description: 内网管理监听器
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
       security:
         - announcementAdminToken: []
       responses:
@@ -48,8 +53,13 @@ paths:
     post:
       summary: 创建公告
       servers:
-        - url: http://192.168.31.102:8521
-          description: 内网管理监听器
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
       security:
         - announcementAdminToken: []
       requestBody:
@@ -75,8 +85,13 @@ paths:
     put:
       summary: 更新公告
       servers:
-        - url: http://192.168.31.102:8521
-          description: 内网管理监听器
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
       security:
         - announcementAdminToken: []
       requestBody:
@@ -93,8 +108,13 @@ paths:
     delete:
       summary: 删除公告
       servers:
-        - url: http://192.168.31.102:8521
-          description: 内网管理监听器
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
       security:
         - announcementAdminToken: []
       responses:

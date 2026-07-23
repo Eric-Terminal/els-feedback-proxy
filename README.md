@@ -37,7 +37,7 @@
 
 ## 环境变量
 - `PORT`：监听端口（默认 `8080`）
-- `ADMIN_LISTEN_ADDR`：管理服务监听地址；启用公告管理或自更新时必填，且只接受内网或回环 IP，例如 `192.168.31.102:8521`
+- `ADMIN_LISTEN_ADDR`：管理服务监听地址；启用公告管理或自更新时必填，例如 `:8521`、`127.0.0.1:8521` 或 `192.168.31.102:8521`
 - `GITHUB_TOKEN`：Fine-grained PAT（必填）
 - `GITHUB_OWNER`：默认 `Eric-Terminal`
 - `GITHUB_REPO`：默认 `ETOS-LLM-Studio`
@@ -85,7 +85,7 @@ ADMIN_LISTEN_ADDR=192.168.31.102:8521
 http://192.168.31.102:8521/admin/announcements
 ```
 
-公网监听器不会注册 `/admin/*` 和 `/v1/admin/*`。Cloudflare Tunnel 继续只转发公开端口，不需要根据 `CF-*` 请求头判断访问来源，也不要为管理端口添加 Tunnel 路由或公网端口映射。
+公网监听器不会注册 `/admin/*` 和 `/v1/admin/*`。管理监听地址完全由部署配置决定；当前家庭服务器通过防火墙、端口映射和 Cloudflare Tunnel 路由保证 `8521` 不暴露到公网。
 
 管理页面支持：
 
