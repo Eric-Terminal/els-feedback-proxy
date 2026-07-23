@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 	"time"
 
+	"els-feedback-proxy/internal/admincli"
 	"els-feedback-proxy/internal/api"
 	"els-feedback-proxy/internal/buildinfo"
 	"els-feedback-proxy/internal/config"
@@ -25,6 +28,15 @@ type duplicateDetector interface {
 }
 
 func main() {
+	handled, cliErr := admincli.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	if handled {
+		if cliErr != nil {
+			fmt.Fprintf(os.Stderr, "命令执行失败: %v\n", cliErr)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("配置加载失败: %v", err)

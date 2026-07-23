@@ -97,6 +97,25 @@ http://192.168.31.102:8521/admin/announcements
 
 公告编号相同的条目会被客户端视为同一公告的语言版本。客户端按语言选择最佳匹配项；需要同时发布多条独立公告时，使用不同编号。
 
+## 公告管理 CLI
+
+CLI 通过独立管理监听器调用与 WebUI 相同的管理 API，不会直接修改数据文件。通过 SSH 登录服务器后，先将 `ANNOUNCEMENT_ADMIN_TOKEN` 注入当前进程环境，再执行：
+
+```bash
+./els-feedback-proxy announcement list
+./els-feedback-proxy announcement create --file announcement.json
+./els-feedback-proxy announcement update --key <公告-key> --file announcement.json
+./els-feedback-proxy announcement delete --key <公告-key>
+```
+
+默认管理 API 地址为 `http://127.0.0.1:8521`。使用其他监听地址时，可以设置 `ELS_ADMIN_URL`，也可以为单次命令传入 `--admin-url`：
+
+```bash
+ELS_ADMIN_URL=http://192.168.31.102:8521 ./els-feedback-proxy announcement list
+```
+
+`create` 和 `update` 的 `--file` 支持使用 `-` 从标准输入读取 JSON。所有成功响应均输出格式化 JSON，方便人工查看或继续交给其他命令处理。完整用法可通过 `./els-feedback-proxy announcement --help` 查看。
+
 ## Cloudflare 缓存与防护
 
 服务会为 `/v1/announcements` 返回独立的浏览器缓存和 `Cloudflare-CDN-Cache-Control` 响应头，并提供内容 ETag。建议在 Cloudflare Cache Rules 中将该路径设置为可缓存，同时让反馈提交接口保持绕过缓存。
