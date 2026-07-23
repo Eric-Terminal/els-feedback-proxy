@@ -214,7 +214,10 @@ func TestAdminHomeCanIssuePasswordlessWebSession(t *testing.T) {
 		httptest.NewRequest(http.MethodGet, "/", nil),
 	)
 	if homeResponse.Code != http.StatusOK ||
-		!strings.Contains(homeResponse.Body.String(), "管理客户端公开内容") ||
+		!strings.Contains(homeResponse.Body.String(), "<h2>概览</h2>") ||
+		!strings.Contains(homeResponse.Body.String(), "管理项目") ||
+		!strings.Contains(homeResponse.Body.String(), `href="/admin/announcements"`) ||
+		!strings.Contains(homeResponse.Body.String(), `href="/admin/distribution"`) ||
 		!strings.Contains(homeResponse.Body.String(), "内网免登录") {
 		t.Fatalf("免登录管理首页响应不正确: code=%d body=%s", homeResponse.Code, homeResponse.Body.String())
 	}

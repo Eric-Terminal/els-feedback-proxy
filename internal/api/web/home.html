@@ -32,54 +32,71 @@
     </header>
 
     <main class="page-shell home-shell">
-      <section class="home-hero panel">
+      <header class="overview-header">
         <div>
-          <p class="eyebrow">私有管理面板</p>
-          <h2>管理客户端公开内容</h2>
-          <p>从这里进入公告发布与官方文件下发。管理功能只在独立管理端口提供。</p>
+          <h2>概览</h2>
+          <p>选择要管理的内容。</p>
         </div>
-        <div class="home-health" aria-label="管理服务状态">
-          <span class="status-dot"></span>
-          <span>运行正常</span>
-        </div>
-      </section>
+      </header>
 
-      <section class="home-grid" aria-label="管理功能">
-        <a class="home-card panel" href="/admin/announcements">
-          <div class="home-card-symbol" aria-hidden="true">Aa</div>
-          <div>
-            <p class="eyebrow">通知中心</p>
-            <h2>公告管理</h2>
-            <p>创建多语言公告，控制通知级别、目标平台、构建范围与发布状态。</p>
+      <div class="overview-layout">
+        <section aria-labelledby="modules-title">
+          <div class="overview-section-heading">
+            <h3 id="modules-title">管理项目</h3>
           </div>
-          <span class="home-card-action">打开公告管理 <span aria-hidden="true">→</span></span>
-        </a>
+          <div class="overview-module-list panel">
+            <a class="overview-module" href="/admin/announcements">
+              <span class="overview-module-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"></path>
+                  <path d="M10 21h4"></path>
+                </svg>
+              </span>
+              <span class="overview-module-copy">
+                <strong>公告</strong>
+                <span>编辑通知内容、语言版本和发布范围</span>
+              </span>
+              <span class="overview-chevron" aria-hidden="true">›</span>
+            </a>
 
-        <a class="home-card panel" href="/admin/distribution">
-          <div class="home-card-symbol home-card-symbol-download" aria-hidden="true">↓</div>
-          <div>
-            <p class="eyebrow">官方数据</p>
-            <h2>文件下发</h2>
-            <p>上传客户端需要的官方文件，管理目标目录、启用状态和内容版本。</p>
+            <a class="overview-module" href="/admin/distribution">
+              <span class="overview-module-icon overview-module-icon-data" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 3v12"></path>
+                  <path d="m7 10 5 5 5-5"></path>
+                  <path d="M5 21h14"></path>
+                </svg>
+              </span>
+              <span class="overview-module-copy">
+                <strong>官方数据</strong>
+                <span>上传文件并配置客户端下发目录</span>
+              </span>
+              <span class="overview-chevron" aria-hidden="true">›</span>
+            </a>
           </div>
-          <span class="home-card-action">打开文件下发 <span aria-hidden="true">→</span></span>
-        </a>
-      </section>
+        </section>
 
-      <section class="home-meta panel" aria-label="服务信息">
-        <div>
-          <span>运行版本</span>
-          <code>{{.Version}}</code>
-        </div>
-        <div>
-          <span>构建提交</span>
-          <code>{{.Commit}}</code>
-        </div>
-        <div>
-          <span>页面访问</span>
-          <strong>{{if .WebAuthDisabled}}内网免登录{{else}}口令会话{{end}}</strong>
-        </div>
-      </section>
+        <aside class="overview-service panel" aria-labelledby="service-title">
+          <div class="overview-service-heading">
+            <h3 id="service-title">服务信息</h3>
+            <span><span class="status-dot"></span>已连接</span>
+          </div>
+          <dl class="overview-details">
+            <div>
+              <dt>运行版本</dt>
+              <dd><code>{{.Version}}</code></dd>
+            </div>
+            <div>
+              <dt>构建提交</dt>
+              <dd><code title="{{.Commit}}">{{.Commit}}</code></dd>
+            </div>
+            <div>
+              <dt>页面访问</dt>
+              <dd>{{if .WebAuthDisabled}}内网免登录{{else}}口令会话{{end}}</dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
     </main>
   </body>
 </html>
