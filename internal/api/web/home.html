@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ELS 管理中心</title>
+    <link rel="stylesheet" href="/admin/assets/admin.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="app-mark app-mark-small" aria-hidden="true">ELS</div>
+        <div>
+          <p class="eyebrow">ETOS LLM Studio</p>
+          <h1>管理中心</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <nav class="admin-nav" aria-label="管理页面">
+          <a class="admin-nav-link is-active" href="/" aria-current="page">概览</a>
+          <a class="admin-nav-link" href="/admin/announcements">公告</a>
+          <a class="admin-nav-link" href="/admin/distribution">官方数据</a>
+        </nav>
+        <span class="service-status"><span class="status-dot"></span>服务已连接</span>
+        {{if .ShowLogout}}
+        <form method="post" action="/admin/logout">
+          <button class="button button-secondary" type="submit">退出</button>
+        </form>
+        {{end}}
+      </div>
+    </header>
+
+    <main class="page-shell home-shell">
+      <section class="home-hero panel">
+        <div>
+          <p class="eyebrow">私有管理面板</p>
+          <h2>管理客户端公开内容</h2>
+          <p>从这里进入公告发布与官方文件下发。管理功能只在独立管理端口提供。</p>
+        </div>
+        <div class="home-health" aria-label="管理服务状态">
+          <span class="status-dot"></span>
+          <span>运行正常</span>
+        </div>
+      </section>
+
+      <section class="home-grid" aria-label="管理功能">
+        <a class="home-card panel" href="/admin/announcements">
+          <div class="home-card-symbol" aria-hidden="true">Aa</div>
+          <div>
+            <p class="eyebrow">通知中心</p>
+            <h2>公告管理</h2>
+            <p>创建多语言公告，控制通知级别、目标平台、构建范围与发布状态。</p>
+          </div>
+          <span class="home-card-action">打开公告管理 <span aria-hidden="true">→</span></span>
+        </a>
+
+        <a class="home-card panel" href="/admin/distribution">
+          <div class="home-card-symbol home-card-symbol-download" aria-hidden="true">↓</div>
+          <div>
+            <p class="eyebrow">官方数据</p>
+            <h2>文件下发</h2>
+            <p>上传客户端需要的官方文件，管理目标目录、启用状态和内容版本。</p>
+          </div>
+          <span class="home-card-action">打开文件下发 <span aria-hidden="true">→</span></span>
+        </a>
+      </section>
+
+      <section class="home-meta panel" aria-label="服务信息">
+        <div>
+          <span>运行版本</span>
+          <code>{{.Version}}</code>
+        </div>
+        <div>
+          <span>构建提交</span>
+          <code>{{.Commit}}</code>
+        </div>
+        <div>
+          <span>页面访问</span>
+          <strong>{{if .WebAuthDisabled}}内网免登录{{else}}口令会话{{end}}</strong>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

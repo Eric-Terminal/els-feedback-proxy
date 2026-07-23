@@ -25,6 +25,7 @@ type Config struct {
 	SelfUpdateServiceName    string
 	SelfUpdateWorkingDir     string
 	AnnouncementAdminToken   string
+	AdminWebAuthDisabled     bool
 	AnnouncementCacheMaxAge  int
 	GitHubTokenLogin         string
 	DeveloperLogins          []string
@@ -73,6 +74,7 @@ func Load() (Config, error) {
 		SelfUpdateServiceName:    getEnv("SELF_UPDATE_SERVICE_NAME", "els-feedback-proxy"),
 		SelfUpdateWorkingDir:     strings.TrimSpace(os.Getenv("SELF_UPDATE_WORKING_DIR")),
 		AnnouncementAdminToken:   strings.TrimSpace(os.Getenv("ANNOUNCEMENT_ADMIN_TOKEN")),
+		AdminWebAuthDisabled:     getEnvAsBool("ADMIN_WEB_AUTH_DISABLED", false),
 		AnnouncementCacheMaxAge:  clampInt(getEnvAsInt("ANNOUNCEMENT_CACHE_MAX_AGE_SECONDS", 300), 30, 3600),
 		GitHubTokenLogin:         strings.TrimSpace(os.Getenv("GITHUB_TOKEN_LOGIN")),
 		DeveloperLogins:          getEnvAsStringSlice("DEVELOPER_GITHUB_LOGINS"),
@@ -110,6 +112,9 @@ func Load() (Config, error) {
 	}
 	if cfg.AnnouncementAdminToken != "" && len(cfg.AnnouncementAdminToken) < 16 {
 		return Config{}, errors.New("ANNOUNCEMENT_ADMIN_TOKEN 至少需要 16 个字符")
+	}
+	if cfg.AdminWebAuthDisabled && cfg.AnnouncementAdminToken == "" {
+		return Config{}, errors.New("关闭管理页面登录时仍需配置 ANNOUNCEMENT_ADMIN_TOKEN 签发会话")
 	}
 	if (cfg.AnnouncementAdminToken != "" || cfg.SelfUpdateSecret != "") &&
 		cfg.AdminListenAddr == "" {

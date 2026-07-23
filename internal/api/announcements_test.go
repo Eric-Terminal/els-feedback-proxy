@@ -185,7 +185,7 @@ func TestAnnouncementAdminLoginCreatesProtectedSession(t *testing.T) {
 func TestPublicListenerDoesNotRegisterAdminRoutes(t *testing.T) {
 	server := newAnnouncementTestServer(t, "browser-admin-token")
 
-	for _, path := range []string{"/admin/announcements", "/v1/admin/announcements"} {
+	for _, path := range []string{"/", "/admin", "/admin/announcements", "/v1/admin/announcements"} {
 		response := httptest.NewRecorder()
 		server.engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusNotFound {
@@ -196,10 +196,57 @@ func TestPublicListenerDoesNotRegisterAdminRoutes(t *testing.T) {
 	adminResponse := httptest.NewRecorder()
 	server.adminEngine.ServeHTTP(
 		adminResponse,
-		httptest.NewRequest(http.MethodGet, "/admin/announcements", nil),
+		httptest.NewRequest(http.MethodGet, "/", nil),
 	)
-	if adminResponse.Code != http.StatusOK {
+	if adminResponse.Code != http.StatusOK ||
+		!strings.Contains(adminResponse.Body.String(), "管理口令") {
 		t.Fatalf("内网管理监听器应提供登录页，实际返回 %d", adminResponse.Code)
+	}
+}
+
+func TestAdminHomeCanIssuePasswordlessWebSession(t *testing.T) {
+	server := newAnnouncementTestServer(t, "browser-admin-token")
+	server.cfg.AdminWebAuthDisabled = true
+
+	homeResponse := httptest.NewRecorder()
+	server.adminEngine.ServeHTTP(
+		homeResponse,
+		httptest.NewRequest(http.MethodGet, "/", nil),
+	)
+	if homeResponse.Code != http.StatusOK ||
+		!strings.Contains(homeResponse.Body.String(), "管理客户端公开内容") ||
+		!strings.Contains(homeResponse.Body.String(), "内网免登录") {
+		t.Fatalf("免登录管理首页响应不正确: code=%d body=%s", homeResponse.Code, homeResponse.Body.String())
+	}
+	if contentType := homeResponse.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
+		t.Fatalf("管理首页 Content-Type 不正确: %s", contentType)
+	}
+	cookies := homeResponse.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != announcementAdminCookieName {
+		t.Fatalf("免登录首页应自动签发管理会话: %+v", cookies)
+	}
+
+	apiRequest := httptest.NewRequest(http.MethodGet, "/v1/admin/announcements", nil)
+	apiRequest.AddCookie(cookies[0])
+	apiResponse := httptest.NewRecorder()
+	server.adminEngine.ServeHTTP(apiResponse, apiRequest)
+	if apiResponse.Code != http.StatusOK {
+		t.Fatalf("自动签发的会话应能访问管理 API，实际 %d", apiResponse.Code)
+	}
+
+	crossOriginRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/admin/announcements",
+		strings.NewReader(`{"id":1,"type":"info","title":"标题","body":"正文","enabled":true}`),
+	)
+	crossOriginRequest.Host = "192.168.31.102:8521"
+	crossOriginRequest.Header.Set("Origin", "https://attacker.example")
+	crossOriginRequest.Header.Set("Content-Type", "application/json")
+	crossOriginRequest.AddCookie(cookies[0])
+	crossOriginResponse := httptest.NewRecorder()
+	server.adminEngine.ServeHTTP(crossOriginResponse, crossOriginRequest)
+	if crossOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("免登录页面仍应拒绝跨站管理请求，实际 %d", crossOriginResponse.Code)
 	}
 }
 

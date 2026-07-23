@@ -178,8 +178,13 @@ func TestDistributionAdminPageRequiresProtectedSession(t *testing.T) {
 		unauthenticatedResponse,
 		httptest.NewRequest(http.MethodGet, "/admin/distribution", nil),
 	)
-	if unauthenticatedResponse.Code != http.StatusSeeOther {
-		t.Fatalf("未登录访问官方数据页面应跳转，实际 %d", unauthenticatedResponse.Code)
+	if unauthenticatedResponse.Code != http.StatusOK ||
+		!strings.Contains(unauthenticatedResponse.Body.String(), "管理口令") {
+		t.Fatalf(
+			"未登录访问官方数据页面应显示登录页: code=%d body=%s",
+			unauthenticatedResponse.Code,
+			unauthenticatedResponse.Body.String(),
+		)
 	}
 
 	form := url.Values{"password": {adminToken}}

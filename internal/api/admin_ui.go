@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"els-feedback-proxy/internal/buildinfo"
 )
 
 const (
@@ -29,6 +31,25 @@ var announcementLoginTemplate = template.Must(
 	template.ParseFS(announcementAdminWeb, "web/login.html"),
 )
 
+var adminHomeTemplate = template.Must(
+	template.ParseFS(announcementAdminWeb, "web/home.html"),
+)
+
+var announcementAdminTemplate = template.Must(
+	template.ParseFS(announcementAdminWeb, "web/admin.html"),
+)
+
+var distributionAdminTemplate = template.Must(
+	template.ParseFS(announcementAdminWeb, "web/distribution.html"),
+)
+
+type adminPageData struct {
+	ShowLogout      bool
+	WebAuthDisabled bool
+	Version         string
+	Commit          string
+}
+
 func (s *Server) adminInterfaceEnabled() bool {
 	return (s.announcements != nil || s.distribution != nil) &&
 		strings.TrimSpace(s.cfg.AnnouncementAdminToken) != "" &&
@@ -36,9 +57,9 @@ func (s *Server) adminInterfaceEnabled() bool {
 }
 
 func (s *Server) registerAdminUIRoutes() {
-	s.adminEngine.GET("/admin", func(c *gin.Context) {
-		c.Redirect(http.StatusTemporaryRedirect, "/admin/announcements")
-	})
+	s.adminEngine.GET("/", s.handleAdminHomePage)
+	s.adminEngine.GET("/admin", s.handleAdminHomePage)
+	s.adminEngine.GET("/admin/", s.handleAdminHomePage)
 	s.adminEngine.GET("/admin/announcements", s.handleAnnouncementAdminPage)
 	s.adminEngine.GET("/admin/distribution", s.handleDistributionAdminPage)
 	s.adminEngine.POST("/admin/login", s.handleAnnouncementAdminLogin)
@@ -54,44 +75,53 @@ func (s *Server) registerAdminUIRoutes() {
 	)
 }
 
+func (s *Server) handleAdminHomePage(c *gin.Context) {
+	writeAnnouncementAdminPageHeaders(c)
+	if !s.prepareAdminPageSession(c) {
+		return
+	}
+	if err := adminHomeTemplate.ExecuteTemplate(c.Writer, "home.html", s.adminPageData()); err != nil {
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
 func (s *Server) handleAnnouncementAdminPage(c *gin.Context) {
 	writeAnnouncementAdminPageHeaders(c)
-	if !s.adminSessionIsValid(c.Request) {
-		c.Status(http.StatusOK)
-		if err := announcementLoginTemplate.ExecuteTemplate(c.Writer, "login.html", struct {
-			LoginFailed bool
-		}{
-			LoginFailed: c.Query("login") == "failed",
-		}); err != nil {
-			c.Status(http.StatusInternalServerError)
-		}
+	if !s.prepareAdminPageSession(c) {
 		return
 	}
 
-	data, err := announcementAdminWeb.ReadFile("web/admin.html")
-	if err != nil {
-		c.String(http.StatusInternalServerError, "读取管理页面失败")
-		return
+	if err := announcementAdminTemplate.ExecuteTemplate(
+		c.Writer,
+		"admin.html",
+		s.adminPageData(),
+	); err != nil {
+		c.Status(http.StatusInternalServerError)
 	}
-	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 }
 
 func (s *Server) handleDistributionAdminPage(c *gin.Context) {
 	writeAnnouncementAdminPageHeaders(c)
-	if !s.adminSessionIsValid(c.Request) {
-		c.Redirect(http.StatusSeeOther, "/admin/announcements")
+	if !s.prepareAdminPageSession(c) {
 		return
 	}
 
-	data, err := announcementAdminWeb.ReadFile("web/distribution.html")
-	if err != nil {
-		c.String(http.StatusInternalServerError, "读取官方数据页面失败")
-		return
+	if err := distributionAdminTemplate.ExecuteTemplate(
+		c.Writer,
+		"distribution.html",
+		s.adminPageData(),
+	); err != nil {
+		c.Status(http.StatusInternalServerError)
 	}
-	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 }
 
 func (s *Server) handleAnnouncementAdminLogin(c *gin.Context) {
+	if s.cfg.AdminWebAuthDisabled {
+		s.setAdminSessionCookie(c)
+		c.Redirect(http.StatusSeeOther, "/")
+		return
+	}
+
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAdminLoginBody)
 	if s.limiter != nil && !s.allowRate(
 		"announcement-admin-login",
@@ -103,17 +133,22 @@ func (s *Server) handleAnnouncementAdminLogin(c *gin.Context) {
 		return
 	}
 	if err := c.Request.ParseForm(); err != nil {
-		c.Redirect(http.StatusSeeOther, "/admin/announcements?login=failed")
+		c.Redirect(http.StatusSeeOther, "/?login=failed")
 		return
 	}
 
 	provided := c.Request.FormValue("password")
 	expected := strings.TrimSpace(s.cfg.AnnouncementAdminToken)
 	if expected == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
-		c.Redirect(http.StatusSeeOther, "/admin/announcements?login=failed")
+		c.Redirect(http.StatusSeeOther, "/?login=failed")
 		return
 	}
 
+	s.setAdminSessionCookie(c)
+	c.Redirect(http.StatusSeeOther, "/")
+}
+
+func (s *Server) setAdminSessionCookie(c *gin.Context) {
 	expiresAt := time.Now().UTC().Add(announcementAdminSessionTTL)
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     announcementAdminCookieName,
@@ -125,7 +160,6 @@ func (s *Server) handleAnnouncementAdminLogin(c *gin.Context) {
 		Secure:   c.Request.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
-	c.Redirect(http.StatusSeeOther, "/admin/announcements")
 }
 
 func (s *Server) handleAnnouncementAdminLogout(c *gin.Context) {
@@ -138,7 +172,36 @@ func (s *Server) handleAnnouncementAdminLogout(c *gin.Context) {
 		Secure:   c.Request.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
-	c.Redirect(http.StatusSeeOther, "/admin/announcements")
+	c.Redirect(http.StatusSeeOther, "/")
+}
+
+func (s *Server) prepareAdminPageSession(c *gin.Context) bool {
+	if s.adminSessionIsValid(c.Request) {
+		return true
+	}
+	if s.cfg.AdminWebAuthDisabled {
+		s.setAdminSessionCookie(c)
+		return true
+	}
+
+	c.Status(http.StatusOK)
+	if err := announcementLoginTemplate.ExecuteTemplate(c.Writer, "login.html", struct {
+		LoginFailed bool
+	}{
+		LoginFailed: c.Query("login") == "failed",
+	}); err != nil {
+		c.Status(http.StatusInternalServerError)
+	}
+	return false
+}
+
+func (s *Server) adminPageData() adminPageData {
+	return adminPageData{
+		ShowLogout:      !s.cfg.AdminWebAuthDisabled,
+		WebAuthDisabled: s.cfg.AdminWebAuthDisabled,
+		Version:         buildinfo.Version,
+		Commit:          buildinfo.Commit,
+	}
 }
 
 func (s *Server) requireAdmin(c *gin.Context) {
@@ -225,6 +288,7 @@ func serveAnnouncementAdminAsset(name, contentType string) gin.HandlerFunc {
 }
 
 func writeAnnouncementAdminPageHeaders(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Security-Policy", strings.Join([]string{
 		"default-src 'none'",

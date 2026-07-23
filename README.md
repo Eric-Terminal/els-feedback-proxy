@@ -6,6 +6,7 @@
 - `GET /v1/announcements`：返回已发布的客户端公告，支持 ETag 与 Cloudflare 边缘缓存
 - `GET /v1/distribution/manifest`：返回客户端官方数据清单，支持 ETag 与 Cloudflare 边缘缓存
 - `GET /v1/distribution/files/<sha256>/<文件名>`：下载内容寻址的不可变官方文件
+- `GET http://<内网地址>/`：仅由管理监听器提供的管理中心首页
 - `GET http://<内网地址>/admin/announcements`：仅由管理监听器提供的公告编辑 WebUI
 - `GET http://<内网地址>/admin/distribution`：仅由管理监听器提供的官方数据管理 WebUI
 - `POST /v1/feedback/challenge`：下发一次性 challenge（120 秒有效）
@@ -69,6 +70,7 @@
 - `SELF_UPDATE_SERVICE_NAME`：更新完成后重启的 systemd 服务名（默认 `els-feedback-proxy`）
 - `SELF_UPDATE_WORKING_DIR`：自动更新工作目录（可选，默认取当前可执行文件所在目录）
 - `ANNOUNCEMENT_ADMIN_TOKEN`：服务管理口令（至少 16 个字符）；留空时不启动公告、官方数据管理页面和管理 API
+- `ADMIN_WEB_AUTH_DISABLED`：是否让内网 WebUI 自动建立管理会话（默认 `false`）；启用时仍需配置管理口令作为会话签名密钥
 - `ANNOUNCEMENT_CACHE_MAX_AGE_SECONDS`：Cloudflare 边缘缓存秒数（默认 `300`，范围 `30~3600`）
 - `ADMIN_LOGIN_LIMIT_PER_WINDOW`：管理页面每 IP 登录尝试上限（默认 `10`，每 15 分钟）
 
@@ -76,15 +78,17 @@
 
 ## 内网管理页面
 
-配置 `ANNOUNCEMENT_ADMIN_TOKEN` 和受保护的管理监听地址：
+配置 `ANNOUNCEMENT_ADMIN_TOKEN` 和受保护的管理监听地址。仅在管理端口已经由局域网、防火墙或 VPN 隔离时，才启用 WebUI 免登录：
 
 ```text
 ADMIN_LISTEN_ADDR=192.168.31.102:8521
+ADMIN_WEB_AUTH_DISABLED=true
 ```
 
 然后在同一局域网内访问：
 
 ```text
+http://192.168.31.102:8521/
 http://192.168.31.102:8521/admin/announcements
 http://192.168.31.102:8521/admin/distribution
 ```
