@@ -25,9 +25,8 @@ func (s *Server) registerAnnouncementRoutes() {
 }
 
 func (s *Server) registerAnnouncementAdminRoutes() {
-	s.registerAnnouncementAdminUIRoutes()
 	adminAPI := s.adminEngine.Group("/v1/admin/announcements")
-	adminAPI.Use(s.requireAnnouncementAdmin)
+	adminAPI.Use(s.requireAdmin)
 	adminAPI.GET("", s.handleAdminListAnnouncements)
 	adminAPI.POST("", s.handleAdminCreateAnnouncement)
 	adminAPI.PUT("/:key", s.handleAdminUpdateAnnouncement)
@@ -41,8 +40,7 @@ func (s *Server) handleListAnnouncements(c *gin.Context) {
 		return
 	}
 
-	digest := sha256.Sum256(payload)
-	etag := `"` + hex.EncodeToString(digest[:]) + `"`
+	etag := payloadETag(payload)
 	cacheMaxAge := s.cfg.AnnouncementCacheMaxAge
 	if cacheMaxAge < 30 {
 		cacheMaxAge = 300
@@ -62,6 +60,11 @@ func (s *Server) handleListAnnouncements(c *gin.Context) {
 	}
 
 	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
+}
+
+func payloadETag(payload []byte) string {
+	digest := sha256.Sum256(payload)
+	return `"` + hex.EncodeToString(digest[:]) + `"`
 }
 
 func (s *Server) handleAdminListAnnouncements(c *gin.Context) {

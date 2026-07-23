@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ELS Feedback & Notification API
-  version: 2.0.0
+  version: 3.0.0
 servers:
   - url: https://feedback.els.ericterminal.com
 paths:
@@ -122,6 +122,133 @@ paths:
           description: 公告已删除
         '404':
           description: 公告不存在
+  /v1/distribution/manifest:
+    get:
+      summary: 获取已发布的官方数据清单
+      responses:
+        '200':
+          description: 官方数据清单
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cloudflare-CDN-Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicDistributionManifest'
+        '304':
+          description: 清单内容未变化
+  /v1/distribution/files/{checksum}/{file_name}:
+    parameters:
+      - in: path
+        name: checksum
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+      - in: path
+        name: file_name
+        required: true
+        schema:
+          type: string
+    get:
+      summary: 下载内容寻址的官方文件
+      responses:
+        '200':
+          description: 官方文件内容，响应可长期不可变缓存
+        '404':
+          description: 文件不存在或已停用
+  /v1/admin/distribution:
+    get:
+      summary: 获取全部官方数据管理记录
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 官方数据管理记录
+        '401':
+          description: 管理鉴权失败
+    post:
+      summary: 上传官方数据
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DistributionUpload'
+      responses:
+        '201':
+          description: 官方数据已创建
+        '400':
+          description: 表单或文件无效
+  /v1/admin/distribution/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+    put:
+      summary: 更新官方数据
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DistributionUpdate'
+      responses:
+        '200':
+          description: 官方数据已更新
+        '404':
+          description: 官方数据不存在
+    delete:
+      summary: 删除官方数据
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '204':
+          description: 官方数据已删除
+        '404':
+          description: 官方数据不存在
   /v1/feedback/challenge:
     post:
       summary: 获取 challenge
@@ -332,3 +459,63 @@ components:
           properties:
             enabled:
               type: boolean
+    PublicDistributionManifest:
+      type: object
+      required: [version, downloads]
+      properties:
+        version:
+          type: integer
+          enum: [1]
+        downloads:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicDistributionEntry'
+    PublicDistributionEntry:
+      type: object
+      required: [name, path, url, file_name, sha256, size]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          example: /Documents/Providers
+        url:
+          type: string
+          example: /v1/distribution/files/0123456789abcdef/provider.json
+        file_name:
+          type: string
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        size:
+          type: integer
+          format: int64
+          minimum: 1
+    DistributionUpload:
+      type: object
+      required: [name, destination_path, enabled, file]
+      properties:
+        name:
+          type: string
+        destination_path:
+          type: string
+          example: /Documents/Providers
+        enabled:
+          type: boolean
+        file:
+          type: string
+          format: binary
+    DistributionUpdate:
+      type: object
+      required: [name, destination_path, enabled]
+      properties:
+        name:
+          type: string
+        destination_path:
+          type: string
+          example: /Documents/Providers
+        enabled:
+          type: boolean
+        file:
+          type: string
+          format: binary

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title>ELS 通知中心</title>
+    <title>ELS 服务中心</title>
     <link rel="stylesheet" href="/admin/assets/admin.css" />
   </head>
   <body class="login-page">
@@ -12,8 +12,8 @@
       <section class="login-card" aria-labelledby="login-title">
         <div class="app-mark" aria-hidden="true">ELS</div>
         <p class="eyebrow">ETOS LLM Studio</p>
-        <h1 id="login-title">通知中心</h1>
-        <p class="login-description">登录后可创建、编辑和发布客户端公告。</p>
+        <h1 id="login-title">服务管理</h1>
+        <p class="login-description">登录后可管理客户端公告与官方下发数据。</p>
 
         {{if .LoginFailed}}
         <p class="form-message form-message-error" role="alert">管理口令不正确，请重新输入。</p>
@@ -31,7 +31,7 @@
           />
           <button class="button button-primary button-full" type="submit">登录</button>
         </form>
-        <p class="login-note">页面与公告接口均由 feedback.els.ericterminal.com 提供。</p>
+        <p class="login-note">管理入口仅供受信任的运维网络使用。</p>
       </section>
     </main>
   </body>

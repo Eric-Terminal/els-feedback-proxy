@@ -29,23 +29,28 @@ var announcementLoginTemplate = template.Must(
 	template.ParseFS(announcementAdminWeb, "web/login.html"),
 )
 
-func (s *Server) announcementAdminEnabled() bool {
-	return s.announcements != nil &&
+func (s *Server) adminInterfaceEnabled() bool {
+	return (s.announcements != nil || s.distribution != nil) &&
 		strings.TrimSpace(s.cfg.AnnouncementAdminToken) != "" &&
 		strings.TrimSpace(s.cfg.AdminListenAddr) != ""
 }
 
-func (s *Server) registerAnnouncementAdminUIRoutes() {
+func (s *Server) registerAdminUIRoutes() {
 	s.adminEngine.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusTemporaryRedirect, "/admin/announcements")
 	})
 	s.adminEngine.GET("/admin/announcements", s.handleAnnouncementAdminPage)
+	s.adminEngine.GET("/admin/distribution", s.handleDistributionAdminPage)
 	s.adminEngine.POST("/admin/login", s.handleAnnouncementAdminLogin)
 	s.adminEngine.POST("/admin/logout", s.handleAnnouncementAdminLogout)
 	s.adminEngine.GET("/admin/assets/admin.css", serveAnnouncementAdminAsset("admin.css", "text/css; charset=utf-8"))
 	s.adminEngine.GET(
 		"/admin/assets/admin.js",
 		serveAnnouncementAdminAsset("admin.js", "text/javascript; charset=utf-8"),
+	)
+	s.adminEngine.GET(
+		"/admin/assets/distribution.js",
+		serveAnnouncementAdminAsset("distribution.js", "text/javascript; charset=utf-8"),
 	)
 }
 
@@ -66,6 +71,21 @@ func (s *Server) handleAnnouncementAdminPage(c *gin.Context) {
 	data, err := announcementAdminWeb.ReadFile("web/admin.html")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "读取管理页面失败")
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+}
+
+func (s *Server) handleDistributionAdminPage(c *gin.Context) {
+	writeAnnouncementAdminPageHeaders(c)
+	if !s.adminSessionIsValid(c.Request) {
+		c.Redirect(http.StatusSeeOther, "/admin/announcements")
+		return
+	}
+
+	data, err := announcementAdminWeb.ReadFile("web/distribution.html")
+	if err != nil {
+		c.String(http.StatusInternalServerError, "读取官方数据页面失败")
 		return
 	}
 	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
@@ -121,7 +141,7 @@ func (s *Server) handleAnnouncementAdminLogout(c *gin.Context) {
 	c.Redirect(http.StatusSeeOther, "/admin/announcements")
 }
 
-func (s *Server) requireAnnouncementAdmin(c *gin.Context) {
+func (s *Server) requireAdmin(c *gin.Context) {
 	if s.adminBearerIsValid(c.Request) {
 		c.Next()
 		return

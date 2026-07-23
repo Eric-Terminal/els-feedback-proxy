@@ -37,6 +37,7 @@ type Server struct {
 	challenges    *security.ChallengeManager
 	tickets       *store.TicketStore
 	announcements *store.AnnouncementStore
+	distribution  *store.DistributionStore
 	reviewer      moderation.Reviewer
 	archives      *store.BlockedArchiveStore
 	developers    map[string]struct{}
@@ -74,6 +75,7 @@ func NewServer(
 	reviewer moderation.Reviewer,
 	archives *store.BlockedArchiveStore,
 	announcements *store.AnnouncementStore,
+	distribution *store.DistributionStore,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -104,6 +106,7 @@ func NewServer(
 		challenges:    challenges,
 		tickets:       tickets,
 		announcements: announcements,
+		distribution:  distribution,
 		reviewer:      reviewer,
 		archives:      archives,
 		developers:    buildDeveloperLoginSet(cfg),
@@ -144,11 +147,13 @@ func (s *Server) registerRoutes() {
 			"build_time":                 buildinfo.BuildTime,
 			"self_update_enabled":        s.selfUpdater != nil,
 			"github_webhook_enabled":     s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "",
-			"announcement_admin_enabled": s.announcementAdminEnabled(),
+			"admin_enabled":              s.adminInterfaceEnabled(),
+			"announcement_admin_enabled": s.adminInterfaceEnabled(),
 		})
 	})
 
 	s.registerAnnouncementRoutes()
+	s.registerDistributionRoutes()
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
@@ -159,8 +164,14 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) registerAdminRoutes() {
-	if s.announcementAdminEnabled() {
-		s.registerAnnouncementAdminRoutes()
+	if s.adminInterfaceEnabled() {
+		s.registerAdminUIRoutes()
+		if s.announcements != nil {
+			s.registerAnnouncementAdminRoutes()
+		}
+		if s.distribution != nil {
+			s.registerDistributionAdminRoutes()
+		}
 	}
 	if s.selfUpdater != nil {
 		s.adminEngine.POST("/v1/admin/self-update", s.handleSelfUpdate)
@@ -170,7 +181,7 @@ func (s *Server) registerAdminRoutes() {
 
 func (s *Server) adminServerEnabled() bool {
 	return strings.TrimSpace(s.cfg.AdminListenAddr) != "" &&
-		(s.announcementAdminEnabled() || s.selfUpdater != nil)
+		(s.adminInterfaceEnabled() || s.selfUpdater != nil)
 }
 
 func (s *Server) handleChallenge(c *gin.Context) {

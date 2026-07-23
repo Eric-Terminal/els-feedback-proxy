@@ -98,6 +98,11 @@ func main() {
 		log.Fatalf("公告存储初始化失败: %v", err)
 	}
 
+	distributionStore, err := store.NewDistributionStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("官方数据存储初始化失败: %v", err)
+	}
+
 	var reviewer moderation.Reviewer = moderation.AllowAllReviewer{}
 	if cfg.ModerationEnabled {
 		reviewer = moderation.NewOpenAIReviewer(moderation.OpenAIReviewerConfig{
@@ -120,6 +125,7 @@ func main() {
 		reviewer,
 		blockedArchiveStore,
 		announcementStore,
+		distributionStore,
 	)
 
 	log.Printf(

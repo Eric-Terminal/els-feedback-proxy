@@ -77,7 +77,7 @@ func (s *AnnouncementStore) List() []AnnouncementRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	records := append([]AnnouncementRecord(nil), s.records...)
+	records := append([]AnnouncementRecord{}, s.records...)
 	sortAnnouncementRecords(records)
 	return records
 }

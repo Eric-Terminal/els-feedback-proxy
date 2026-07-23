@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ELS 官方数据</title>
+    <link rel="stylesheet" href="/admin/assets/admin.css" />
+    <script src="/admin/assets/distribution.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="app-mark app-mark-small" aria-hidden="true">ELS</div>
+        <div>
+          <p class="eyebrow">ETOS LLM Studio</p>
+          <h1>官方数据</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <nav class="admin-nav" aria-label="管理页面">
+          <a class="admin-nav-link" href="/admin/announcements">公告</a>
+          <a class="admin-nav-link is-active" href="/admin/distribution" aria-current="page">官方数据</a>
+        </nav>
+        <span class="service-status"><span class="status-dot"></span>服务已连接</span>
+        <form method="post" action="/admin/logout">
+          <button class="button button-secondary" type="submit">退出</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="summary-grid" aria-label="官方数据概览">
+        <article class="summary-card">
+          <span>全部文件</span>
+          <strong id="summary-total">0</strong>
+        </article>
+        <article class="summary-card">
+          <span>正在下发</span>
+          <strong id="summary-published">0</strong>
+        </article>
+        <article class="summary-card">
+          <span>文件总量</span>
+          <strong id="summary-size">0 B</strong>
+        </article>
+        <article class="summary-card summary-card-endpoint">
+          <span>客户端清单</span>
+          <code>/v1/distribution/manifest</code>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel announcement-browser" aria-label="官方数据文件列表">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">文件库</p>
+              <h2>下发内容</h2>
+            </div>
+            <button id="new-record-button" class="button button-primary" type="button">上传</button>
+          </div>
+
+          <label class="search-field" for="record-search">
+            <span class="visually-hidden">搜索官方数据</span>
+            <input id="record-search" type="search" placeholder="搜索名称、文件或目标目录" />
+          </label>
+
+          <div id="record-list" class="record-list" aria-live="polite"></div>
+          <div id="record-empty" class="empty-state" hidden>
+            <div class="empty-symbol" aria-hidden="true">⇩</div>
+            <h3>还没有下发文件</h3>
+            <p>上传文件并选择目标目录后，客户端即可在首次启动或手动同步时获取。</p>
+          </div>
+        </aside>
+
+        <section class="panel editor-panel" aria-labelledby="editor-title">
+          <div class="panel-heading editor-heading">
+            <div>
+              <p id="editor-mode" class="eyebrow">新文件</p>
+              <h2 id="editor-title">配置下发内容</h2>
+            </div>
+            <span id="save-state" class="save-state">尚未保存</span>
+          </div>
+
+          <form id="distribution-form" class="announcement-form">
+            <section class="notice-panel" aria-label="公开范围提示">
+              <strong>公开数据提醒</strong>
+              <p>启用后的文件可被所有客户端读取。不要上传拥有计费、管理或其他敏感权限的密钥。</p>
+            </section>
+
+            <fieldset>
+              <legend>清单设置</legend>
+              <div class="form-grid form-grid-two">
+                <label>
+                  <span>显示名称</span>
+                  <input id="record-name" name="name" type="text" maxlength="120" placeholder="例如：默认提供商配置" required />
+                  <small>用于管理列表和客户端同步记录</small>
+                </label>
+                <label>
+                  <span>发布状态</span>
+                  <span class="switch-row">
+                    <input id="record-enabled" name="enabled" type="checkbox" />
+                    <span>允许客户端下载</span>
+                  </span>
+                  <small>关闭后会从公开清单移除，CDN 缓存可能短暂保留</small>
+                </label>
+              </div>
+
+              <label>
+                <span>客户端目标目录</span>
+                <input
+                  id="record-path"
+                  name="destination_path"
+                  type="text"
+                  value="/Documents/Providers"
+                  list="destination-options"
+                  required
+                />
+                <datalist id="destination-options">
+                  <option value="/Documents/Providers"></option>
+                  <option value="/Documents/Backgrounds"></option>
+                  <option value="/Documents"></option>
+                </datalist>
+                <small>只能写入 App 的 Documents 目录；上传文件名会保留</small>
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <legend>文件内容</legend>
+              <label>
+                <span id="file-label">选择文件</span>
+                <input id="record-file" name="file" type="file" required />
+                <small id="file-help">单个文件最大 32 MiB；更新记录时可不选择文件，仅修改清单设置</small>
+              </label>
+
+              <section id="file-detail" class="file-detail" hidden>
+                <div>
+                  <span>当前文件</span>
+                  <strong id="file-name">—</strong>
+                </div>
+                <div>
+                  <span>大小</span>
+                  <strong id="file-size">—</strong>
+                </div>
+                <div>
+                  <span>SHA256</span>
+                  <code id="file-checksum">—</code>
+                </div>
+                <div>
+                  <span>公开地址</span>
+                  <code id="file-url">—</code>
+                </div>
+              </section>
+            </fieldset>
+
+            <div class="form-actions">
+              <div class="secondary-actions">
+                <button id="delete-button" class="button button-danger" type="button" disabled>删除</button>
+              </div>
+              <button class="button button-primary button-save" type="submit">保存更改</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

@@ -20,7 +20,7 @@ const (
 	maxCLIResponseBody = 1 << 20
 )
 
-type announcementClient struct {
+type adminClient struct {
 	baseURL string
 	token   string
 	http    *http.Client
@@ -35,6 +35,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) (bool, error)
 	switch args[0] {
 	case "announcement", "announcements":
 		return true, runAnnouncement(args[1:], stdin, stdout, stderr)
+	case "distribution":
+		return true, runDistribution(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		writeRootHelp(stdout)
 		return true, nil
@@ -77,7 +79,7 @@ func runAnnouncementList(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	client, err := newAnnouncementClient(*adminURL)
+	client, err := newAdminClient(*adminURL)
 	if err != nil {
 		return err
 	}
@@ -105,7 +107,7 @@ func runAnnouncementCreate(
 	if err != nil {
 		return err
 	}
-	client, err := newAnnouncementClient(*adminURL)
+	client, err := newAdminClient(*adminURL)
 	if err != nil {
 		return err
 	}
@@ -137,7 +139,7 @@ func runAnnouncementUpdate(args []string, stdin io.Reader, stdout, stderr io.Wri
 	if err != nil {
 		return err
 	}
-	client, err := newAnnouncementClient(*adminURL)
+	client, err := newAdminClient(*adminURL)
 	if err != nil {
 		return err
 	}
@@ -162,7 +164,7 @@ func runAnnouncementDelete(args []string, stdout, stderr io.Writer) error {
 		return errors.New("必须提供 --key")
 	}
 
-	client, err := newAnnouncementClient(*adminURL)
+	client, err := newAdminClient(*adminURL)
 	if err != nil {
 		return err
 	}
@@ -198,7 +200,7 @@ func parseCommandFlags(flags *flag.FlagSet, args []string) error {
 	return nil
 }
 
-func newAnnouncementClient(rawURL string) (*announcementClient, error) {
+func newAdminClient(rawURL string) (*adminClient, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return nil, errors.New("管理 API 地址无效")
@@ -208,14 +210,14 @@ func newAnnouncementClient(rawURL string) (*announcementClient, error) {
 	if token == "" {
 		return nil, errors.New("缺少环境变量 ANNOUNCEMENT_ADMIN_TOKEN")
 	}
-	return &announcementClient{
+	return &adminClient{
 		baseURL: strings.TrimRight(parsed.String(), "/"),
 		token:   token,
 		http:    &http.Client{Timeout: 15 * time.Second},
 	}, nil
 }
 
-func (client *announcementClient) request(
+func (client *adminClient) request(
 	method string,
 	path string,
 	body []byte,
@@ -225,12 +227,15 @@ func (client *announcementClient) request(
 	if err != nil {
 		return fmt.Errorf("创建管理请求失败: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+client.token)
-	request.Header.Set("Accept", "application/json")
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
+	return client.perform(request, stdout)
+}
 
+func (client *adminClient) perform(request *http.Request, stdout io.Writer) error {
+	request.Header.Set("Authorization", "Bearer "+client.token)
+	request.Header.Set("Accept", "application/json")
 	response, err := client.http.Do(request)
 	if err != nil {
 		return fmt.Errorf("连接管理 API 失败: %w", err)
@@ -304,8 +309,9 @@ func writeRootHelp(writer io.Writer) {
 用法:
   els-feedback-proxy                         启动服务
   els-feedback-proxy announcement <命令>    通过管理 API 操作公告
+  els-feedback-proxy distribution <命令>    通过管理 API 操作官方数据
 
-使用 announcement --help 查看公告命令。`)
+使用对应命令的 --help 查看详细用法。`)
 }
 
 func writeAnnouncementHelp(writer io.Writer) {

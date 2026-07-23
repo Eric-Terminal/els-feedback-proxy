@@ -134,6 +134,30 @@ code {
   gap: 12px;
 }
 
+.admin-nav {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-muted);
+}
+
+.admin-nav-link {
+  padding: 7px 11px;
+  border-radius: 8px;
+  color: var(--secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.admin-nav-link:hover,
+.admin-nav-link.is-active {
+  color: var(--text);
+  background: var(--surface-solid);
+}
+
 .service-status {
   display: inline-flex;
   align-items: center;
@@ -318,6 +342,17 @@ code {
   font-family: "SFMono-Regular", Consolas, monospace;
 }
 
+.record-card-file {
+  display: block;
+  overflow: hidden;
+  margin-top: 7px;
+  color: var(--secondary);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .record-card-meta {
   margin-top: 8px;
 }
@@ -396,6 +431,24 @@ code {
   gap: 24px;
 }
 
+.notice-panel {
+  padding: 15px 17px;
+  border: 1px solid rgba(197, 106, 20, 0.18);
+  border-radius: var(--radius-medium);
+  color: var(--warning);
+  background: rgba(197, 106, 20, 0.07);
+}
+
+.notice-panel strong {
+  font-size: 0.8rem;
+}
+
+.notice-panel p {
+  margin: 5px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
 fieldset {
   display: flex;
   min-width: 0;
@@ -456,6 +509,21 @@ textarea {
   transition:
     border-color 150ms ease,
     box-shadow 150ms ease;
+}
+
+input[type="file"] {
+  padding: 8px;
+}
+
+input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 700;
+  cursor: pointer;
 }
 
 textarea {
@@ -543,6 +611,37 @@ textarea:focus {
   font-size: 0.84rem;
   line-height: 1.65;
   white-space: pre-wrap;
+}
+
+.file-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-muted);
+}
+
+.file-detail div {
+  min-width: 0;
+}
+
+.file-detail span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--secondary);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.file-detail strong,
+.file-detail code {
+  display: block;
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .form-actions {
@@ -742,6 +841,11 @@ textarea:focus {
     display: none;
   }
 
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .page-shell {
     padding-top: 18px;
   }
@@ -774,7 +878,8 @@ textarea:focus {
   }
 
   .form-grid-three,
-  .form-grid-two {
+  .form-grid-two,
+  .file-detail {
     grid-template-columns: 1fr;
   }
 

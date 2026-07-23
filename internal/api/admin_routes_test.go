@@ -26,6 +26,7 @@ func TestSelfUpdateRoutesOnlyRegisterOnAdminListener(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	publicResponse := httptest.NewRecorder()
