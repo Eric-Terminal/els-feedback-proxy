@@ -372,7 +372,10 @@ func (u *selfUpdateManager) fetchRelease(ctx context.Context, tag string) (githu
 	}
 	defer response.Body.Close()
 
-	body, _ := io.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return githubRelease{}, fmt.Errorf("读取 GitHub Release 响应失败: %w", err)
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return githubRelease{}, fmt.Errorf("GitHub Release 查询失败: HTTP %d, body=%s", response.StatusCode, string(body))
 	}
@@ -425,8 +428,26 @@ func (u *selfUpdateManager) download(ctx context.Context, downloadURL string) ([
 			continue
 		}
 
-		body, _ := io.ReadAll(response.Body)
+		body, readErr := io.ReadAll(response.Body)
 		response.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("读取下载响应失败: %w", readErr)
+			if !shouldRetrySelfUpdateAttempt(ctx, attempt) {
+				return nil, lastErr
+			}
+			continue
+		}
+		if response.ContentLength >= 0 && int64(len(body)) != response.ContentLength {
+			lastErr = fmt.Errorf(
+				"下载响应不完整: 期望 %d 字节，实际 %d 字节",
+				response.ContentLength,
+				len(body),
+			)
+			if !shouldRetrySelfUpdateAttempt(ctx, attempt) {
+				return nil, lastErr
+			}
+			continue
+		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
 			return body, nil
 		}

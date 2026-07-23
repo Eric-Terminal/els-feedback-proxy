@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -314,6 +315,35 @@ func TestSelfUpdaterApplyReleaseRetriesTransientDownloadFailure(t *testing.T) {
 	}
 	if archiveAttempts != 3 {
 		t.Fatalf("期望尝试 3 次下载，实际=%d", archiveAttempts)
+	}
+}
+
+func TestSelfUpdaterDownloadRetriesTruncatedResponse(t *testing.T) {
+	content := bytes.Repeat([]byte("release-asset"), 128)
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+		if attempts == 1 {
+			_, _ = w.Write(content[:len(content)/2])
+			return
+		}
+		_, _ = w.Write(content)
+	}))
+	defer server.Close()
+
+	updater := &selfUpdateManager{
+		httpClient: server.Client(),
+	}
+	downloaded, err := updater.download(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("截断响应重试后应成功，实际错误: %v", err)
+	}
+	if !bytes.Equal(downloaded, content) {
+		t.Fatalf("重试后下载内容不完整")
+	}
+	if attempts != 2 {
+		t.Fatalf("期望下载 2 次，实际=%d", attempts)
 	}
 }
 
