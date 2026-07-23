@@ -81,6 +81,11 @@ func main() {
 		log.Fatalf("审核留档存储初始化失败: %v", err)
 	}
 
+	announcementStore, err := store.NewAnnouncementStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("公告存储初始化失败: %v", err)
+	}
+
 	var reviewer moderation.Reviewer = moderation.AllowAllReviewer{}
 	if cfg.ModerationEnabled {
 		reviewer = moderation.NewOpenAIReviewer(moderation.OpenAIReviewerConfig{
@@ -93,7 +98,17 @@ func main() {
 		})
 	}
 
-	srv := api.NewServer(cfg, ghClient, limiter, dedupe, challenges, ticketStore, reviewer, blockedArchiveStore)
+	srv := api.NewServer(
+		cfg,
+		ghClient,
+		limiter,
+		dedupe,
+		challenges,
+		ticketStore,
+		reviewer,
+		blockedArchiveStore,
+		announcementStore,
+	)
 
 	log.Printf(
 		"ELS Feedback Proxy 启动: :%s (version=%s commit=%s build_time=%s)",

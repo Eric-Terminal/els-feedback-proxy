@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
-  title: ELS Feedback Proxy API
-  version: 1.0.0
+  title: ELS Feedback & Notification API
+  version: 2.0.0
 servers:
   - url: https://feedback.els.ericterminal.com
 paths:
@@ -11,6 +11,85 @@ paths:
       responses:
         '200':
           description: ok
+  /v1/announcements:
+    get:
+      summary: 获取已发布的客户端公告
+      responses:
+        '200':
+          description: 公告数组；没有公告时返回空数组
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cloudflare-CDN-Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicAnnouncement'
+        '304':
+          description: 公告内容未变化
+  /v1/admin/announcements:
+    get:
+      summary: 获取全部公告管理记录
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 公告管理记录
+        '401':
+          description: 管理鉴权失败
+    post:
+      summary: 创建公告
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnouncementRecordInput'
+      responses:
+        '201':
+          description: 公告已创建
+        '400':
+          description: 公告字段无效
+        '401':
+          description: 管理鉴权失败
+  /v1/admin/announcements/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+    put:
+      summary: 更新公告
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnouncementRecordInput'
+      responses:
+        '200':
+          description: 公告已更新
+        '404':
+          description: 公告不存在
+    delete:
+      summary: 删除公告
+      security:
+        - announcementAdminToken: []
+      responses:
+        '204':
+          description: 公告已删除
+        '404':
+          description: 公告不存在
   /v1/feedback/challenge:
     post:
       summary: 获取 challenge
@@ -184,3 +263,40 @@ paths:
           description: 评论被暂时隐藏，已发布占位评论
         '403':
           description: ticket_token 无效
+components:
+  securitySchemes:
+    announcementAdminToken:
+      type: http
+      scheme: bearer
+      description: 使用 ANNOUNCEMENT_ADMIN_TOKEN；浏览器管理台使用安全会话 Cookie
+  schemas:
+    PublicAnnouncement:
+      type: object
+      required: [id, type, title, body]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [info, warning, blocking]
+        min_build:
+          type: string
+        max_build:
+          type: string
+        language:
+          type: string
+        platform:
+          type: string
+          enum: [iOS, watchOS]
+        title:
+          type: string
+        body:
+          type: string
+    AnnouncementRecordInput:
+      allOf:
+        - $ref: '#/components/schemas/PublicAnnouncement'
+        - type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean

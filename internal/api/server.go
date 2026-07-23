@@ -28,18 +28,19 @@ import (
 
 // Server HTTP 服务封装
 type Server struct {
-	cfg         config.Config
-	gh          githubGateway
-	limiter     rateLimiter
-	dedupe      duplicateDetector
-	statusCache *issueStatusCache
-	selfUpdater selfUpdateController
-	challenges  *security.ChallengeManager
-	tickets     *store.TicketStore
-	reviewer    moderation.Reviewer
-	archives    *store.BlockedArchiveStore
-	developers  map[string]struct{}
-	engine      *gin.Engine
+	cfg           config.Config
+	gh            githubGateway
+	limiter       rateLimiter
+	dedupe        duplicateDetector
+	statusCache   *issueStatusCache
+	selfUpdater   selfUpdateController
+	challenges    *security.ChallengeManager
+	tickets       *store.TicketStore
+	announcements *store.AnnouncementStore
+	reviewer      moderation.Reviewer
+	archives      *store.BlockedArchiveStore
+	developers    map[string]struct{}
+	engine        *gin.Engine
 }
 
 type selfUpdateController interface {
@@ -71,6 +72,7 @@ func NewServer(
 	tickets *store.TicketStore,
 	reviewer moderation.Reviewer,
 	archives *store.BlockedArchiveStore,
+	announcements *store.AnnouncementStore,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -78,19 +80,27 @@ func NewServer(
 		reviewer = moderation.AllowAllReviewer{}
 	}
 
+	engine := gin.New()
+	if err := engine.SetTrustedProxies(cfg.TrustedProxyCIDRs); err != nil {
+		panic(fmt.Sprintf("设置可信代理失败: %v", err))
+	}
+	engine.ForwardedByClientIP = true
+	engine.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"}
+
 	server := &Server{
-		cfg:         cfg,
-		gh:          gh,
-		limiter:     limiter,
-		dedupe:      dedupe,
-		statusCache: newIssueStatusCache(time.Hour),
-		selfUpdater: newSelfUpdateManager(cfg),
-		challenges:  challenges,
-		tickets:     tickets,
-		reviewer:    reviewer,
-		archives:    archives,
-		developers:  buildDeveloperLoginSet(cfg),
-		engine:      gin.New(),
+		cfg:           cfg,
+		gh:            gh,
+		limiter:       limiter,
+		dedupe:        dedupe,
+		statusCache:   newIssueStatusCache(time.Hour),
+		selfUpdater:   newSelfUpdateManager(cfg),
+		challenges:    challenges,
+		tickets:       tickets,
+		announcements: announcements,
+		reviewer:      reviewer,
+		archives:      archives,
+		developers:    buildDeveloperLoginSet(cfg),
+		engine:        engine,
 	}
 
 	server.engine.Use(gin.Recovery())
@@ -106,16 +116,18 @@ func (s *Server) Run() error {
 func (s *Server) registerRoutes() {
 	s.engine.GET("/v1/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"ok":                     true,
-			"time":                   time.Now().UTC().Format(time.RFC3339),
-			"version":                buildinfo.Version,
-			"commit":                 buildinfo.Commit,
-			"build_time":             buildinfo.BuildTime,
-			"self_update_enabled":    s.selfUpdater != nil,
-			"github_webhook_enabled": s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "",
+			"ok":                         true,
+			"time":                       time.Now().UTC().Format(time.RFC3339),
+			"version":                    buildinfo.Version,
+			"commit":                     buildinfo.Commit,
+			"build_time":                 buildinfo.BuildTime,
+			"self_update_enabled":        s.selfUpdater != nil,
+			"github_webhook_enabled":     s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "",
+			"announcement_admin_enabled": s.announcementAdminEnabled(),
 		})
 	})
 
+	s.registerAnnouncementRoutes()
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)

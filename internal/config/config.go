@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -10,91 +12,107 @@ import (
 
 // Config 运行时配置
 type Config struct {
-	Port                    string
-	GitHubToken             string
-	GitHubOwner             string
-	GitHubRepo              string
-	GitHubWebhookSecret     string
-	SelfUpdateSecret        string
-	SelfUpdateRepoOwner     string
-	SelfUpdateRepoName      string
-	SelfUpdateGitHubToken   string
-	SelfUpdateServiceName   string
-	SelfUpdateWorkingDir    string
-	GitHubTokenLogin        string
-	DeveloperLogins         []string
-	DataDir                 string
-	RequiredUAKeyword       string
-	RedisAddr               string
-	RedisPassword           string
-	RedisDB                 int
-	RedisKeyPrefix          string
-	IssuesPath              string
-	RateWindow              time.Duration
-	ChallengeTTL            time.Duration
-	TimestampSkew           time.Duration
-	DuplicateWindow         time.Duration
-	PoWDifficultyBits       int
-	SignatureFailThreshold  int
-	SignatureBlockDuration  time.Duration
-	ChallengeLimitPerWindow int
-	SubmitLimitPerWindow    int
-	QueryLimitPerWindow     int
-	CommentLimitPerWindow   int
-	ModerationEnabled       bool
-	ModerationAPIBaseURL    string
-	ModerationAPIKey        string
-	ModerationModel         string
-	ModerationTimeout       time.Duration
-	ModerationMaxRetries    int
-	ModerationTemperature   float64
+	Port                     string
+	GitHubToken              string
+	GitHubOwner              string
+	GitHubRepo               string
+	GitHubWebhookSecret      string
+	SelfUpdateSecret         string
+	SelfUpdateRepoOwner      string
+	SelfUpdateRepoName       string
+	SelfUpdateGitHubToken    string
+	SelfUpdateServiceName    string
+	SelfUpdateWorkingDir     string
+	AnnouncementAdminToken   string
+	AnnouncementCacheMaxAge  int
+	GitHubTokenLogin         string
+	DeveloperLogins          []string
+	DataDir                  string
+	RequiredUAKeyword        string
+	RedisAddr                string
+	RedisPassword            string
+	RedisDB                  int
+	RedisKeyPrefix           string
+	TrustedProxyCIDRs        []string
+	IssuesPath               string
+	RateWindow               time.Duration
+	ChallengeTTL             time.Duration
+	TimestampSkew            time.Duration
+	DuplicateWindow          time.Duration
+	PoWDifficultyBits        int
+	SignatureFailThreshold   int
+	SignatureBlockDuration   time.Duration
+	ChallengeLimitPerWindow  int
+	SubmitLimitPerWindow     int
+	QueryLimitPerWindow      int
+	CommentLimitPerWindow    int
+	AdminLoginLimitPerWindow int
+	ModerationEnabled        bool
+	ModerationAPIBaseURL     string
+	ModerationAPIKey         string
+	ModerationModel          string
+	ModerationTimeout        time.Duration
+	ModerationMaxRetries     int
+	ModerationTemperature    float64
 }
 
 // Load 从环境变量加载配置
 func Load() (Config, error) {
 	cfg := Config{
-		Port:                    getEnv("PORT", "8080"),
-		GitHubToken:             os.Getenv("GITHUB_TOKEN"),
-		GitHubOwner:             getEnv("GITHUB_OWNER", "Eric-Terminal"),
-		GitHubRepo:              getEnv("GITHUB_REPO", "ETOS-LLM-Studio"),
-		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
-		SelfUpdateSecret:        strings.TrimSpace(os.Getenv("SELF_UPDATE_SECRET")),
-		SelfUpdateRepoOwner:     getEnv("SELF_UPDATE_REPO_OWNER", "Eric-Terminal"),
-		SelfUpdateRepoName:      getEnv("SELF_UPDATE_REPO_NAME", "els-feedback-proxy"),
-		SelfUpdateGitHubToken:   strings.TrimSpace(os.Getenv("SELF_UPDATE_GITHUB_TOKEN")),
-		SelfUpdateServiceName:   getEnv("SELF_UPDATE_SERVICE_NAME", "els-feedback-proxy"),
-		SelfUpdateWorkingDir:    strings.TrimSpace(os.Getenv("SELF_UPDATE_WORKING_DIR")),
-		GitHubTokenLogin:        strings.TrimSpace(os.Getenv("GITHUB_TOKEN_LOGIN")),
-		DeveloperLogins:         getEnvAsStringSlice("DEVELOPER_GITHUB_LOGINS"),
-		DataDir:                 getEnv("DATA_DIR", "./data"),
-		RequiredUAKeyword:       getEnv("REQUIRED_UA_KEYWORD", "ETOS LLM Studio"),
-		RedisAddr:               strings.TrimSpace(os.Getenv("REDIS_ADDR")),
-		RedisPassword:           os.Getenv("REDIS_PASSWORD"),
-		RedisDB:                 getEnvAsInt("REDIS_DB", 0),
-		RedisKeyPrefix:          getEnv("REDIS_KEY_PREFIX", "els-feedback"),
-		IssuesPath:              "/v1/feedback/issues",
-		RateWindow:              15 * time.Minute,
-		ChallengeTTL:            120 * time.Second,
-		TimestampSkew:           90 * time.Second,
-		DuplicateWindow:         10 * time.Minute,
-		PoWDifficultyBits:       clampInt(getEnvAsInt("POW_DIFFICULTY_BITS", 20), 0, 30),
-		SignatureFailThreshold:  5,
-		SignatureBlockDuration:  10 * time.Minute,
-		ChallengeLimitPerWindow: getEnvAsInt("CHALLENGE_LIMIT_PER_WINDOW", 30),
-		SubmitLimitPerWindow:    getEnvAsInt("SUBMIT_LIMIT_PER_WINDOW", 6),
-		QueryLimitPerWindow:     getEnvAsInt("QUERY_LIMIT_PER_WINDOW", 60),
-		CommentLimitPerWindow:   getEnvAsInt("COMMENT_LIMIT_PER_WINDOW", 20),
-		ModerationEnabled:       getEnvAsBool("MODERATION_ENABLED", true),
-		ModerationAPIBaseURL:    strings.TrimSpace(os.Getenv("MODERATION_API_BASE_URL")),
-		ModerationAPIKey:        strings.TrimSpace(os.Getenv("MODERATION_API_KEY")),
-		ModerationModel:         strings.TrimSpace(os.Getenv("MODERATION_MODEL")),
-		ModerationTimeout:       time.Duration(clampInt(getEnvAsInt("MODERATION_TIMEOUT_SECONDS", 15), 3, 120)) * time.Second,
-		ModerationMaxRetries:    clampInt(getEnvAsInt("MODERATION_MAX_RETRIES", 3), 1, 5),
-		ModerationTemperature:   clampFloat(getEnvAsFloat("MODERATION_TEMPERATURE", 0), 0, 2),
+		Port:                     getEnv("PORT", "8080"),
+		GitHubToken:              os.Getenv("GITHUB_TOKEN"),
+		GitHubOwner:              getEnv("GITHUB_OWNER", "Eric-Terminal"),
+		GitHubRepo:               getEnv("GITHUB_REPO", "ETOS-LLM-Studio"),
+		GitHubWebhookSecret:      strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
+		SelfUpdateSecret:         strings.TrimSpace(os.Getenv("SELF_UPDATE_SECRET")),
+		SelfUpdateRepoOwner:      getEnv("SELF_UPDATE_REPO_OWNER", "Eric-Terminal"),
+		SelfUpdateRepoName:       getEnv("SELF_UPDATE_REPO_NAME", "els-feedback-proxy"),
+		SelfUpdateGitHubToken:    strings.TrimSpace(os.Getenv("SELF_UPDATE_GITHUB_TOKEN")),
+		SelfUpdateServiceName:    getEnv("SELF_UPDATE_SERVICE_NAME", "els-feedback-proxy"),
+		SelfUpdateWorkingDir:     strings.TrimSpace(os.Getenv("SELF_UPDATE_WORKING_DIR")),
+		AnnouncementAdminToken:   strings.TrimSpace(os.Getenv("ANNOUNCEMENT_ADMIN_TOKEN")),
+		AnnouncementCacheMaxAge:  clampInt(getEnvAsInt("ANNOUNCEMENT_CACHE_MAX_AGE_SECONDS", 300), 30, 3600),
+		GitHubTokenLogin:         strings.TrimSpace(os.Getenv("GITHUB_TOKEN_LOGIN")),
+		DeveloperLogins:          getEnvAsStringSlice("DEVELOPER_GITHUB_LOGINS"),
+		DataDir:                  getEnv("DATA_DIR", "./data"),
+		RequiredUAKeyword:        getEnv("REQUIRED_UA_KEYWORD", "ETOS LLM Studio"),
+		RedisAddr:                strings.TrimSpace(os.Getenv("REDIS_ADDR")),
+		RedisPassword:            os.Getenv("REDIS_PASSWORD"),
+		RedisDB:                  getEnvAsInt("REDIS_DB", 0),
+		RedisKeyPrefix:           getEnv("REDIS_KEY_PREFIX", "els-feedback"),
+		TrustedProxyCIDRs:        parseCommaSeparated(getEnv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")),
+		IssuesPath:               "/v1/feedback/issues",
+		RateWindow:               15 * time.Minute,
+		ChallengeTTL:             120 * time.Second,
+		TimestampSkew:            90 * time.Second,
+		DuplicateWindow:          10 * time.Minute,
+		PoWDifficultyBits:        clampInt(getEnvAsInt("POW_DIFFICULTY_BITS", 20), 0, 30),
+		SignatureFailThreshold:   5,
+		SignatureBlockDuration:   10 * time.Minute,
+		ChallengeLimitPerWindow:  getEnvAsInt("CHALLENGE_LIMIT_PER_WINDOW", 30),
+		SubmitLimitPerWindow:     getEnvAsInt("SUBMIT_LIMIT_PER_WINDOW", 6),
+		QueryLimitPerWindow:      getEnvAsInt("QUERY_LIMIT_PER_WINDOW", 60),
+		CommentLimitPerWindow:    getEnvAsInt("COMMENT_LIMIT_PER_WINDOW", 20),
+		AdminLoginLimitPerWindow: getEnvAsInt("ADMIN_LOGIN_LIMIT_PER_WINDOW", 10),
+		ModerationEnabled:        getEnvAsBool("MODERATION_ENABLED", true),
+		ModerationAPIBaseURL:     strings.TrimSpace(os.Getenv("MODERATION_API_BASE_URL")),
+		ModerationAPIKey:         strings.TrimSpace(os.Getenv("MODERATION_API_KEY")),
+		ModerationModel:          strings.TrimSpace(os.Getenv("MODERATION_MODEL")),
+		ModerationTimeout:        time.Duration(clampInt(getEnvAsInt("MODERATION_TIMEOUT_SECONDS", 15), 3, 120)) * time.Second,
+		ModerationMaxRetries:     clampInt(getEnvAsInt("MODERATION_MAX_RETRIES", 3), 1, 5),
+		ModerationTemperature:    clampFloat(getEnvAsFloat("MODERATION_TEMPERATURE", 0), 0, 2),
 	}
 
 	if cfg.GitHubToken == "" {
 		return Config{}, errors.New("缺少 GITHUB_TOKEN")
+	}
+	if cfg.AnnouncementAdminToken != "" && len(cfg.AnnouncementAdminToken) < 16 {
+		return Config{}, errors.New("ANNOUNCEMENT_ADMIN_TOKEN 至少需要 16 个字符")
+	}
+	for _, trustedProxy := range cfg.TrustedProxyCIDRs {
+		if _, _, err := net.ParseCIDR(trustedProxy); err != nil {
+			return Config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS 包含无效网段 %q", trustedProxy)
+		}
 	}
 	if cfg.ModerationEnabled {
 		if cfg.ModerationAPIBaseURL == "" {
@@ -159,7 +177,11 @@ func getEnvAsBool(key string, fallback bool) bool {
 }
 
 func getEnvAsStringSlice(key string) []string {
-	raw := strings.TrimSpace(os.Getenv(key))
+	return parseCommaSeparated(os.Getenv(key))
+}
+
+func parseCommaSeparated(raw string) []string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return []string{}
 	}

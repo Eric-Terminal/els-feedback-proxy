@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ELS 通知中心</title>
+    <link rel="stylesheet" href="/admin/assets/admin.css" />
+    <script src="/admin/assets/admin.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="app-mark app-mark-small" aria-hidden="true">ELS</div>
+        <div>
+          <p class="eyebrow">ETOS LLM Studio</p>
+          <h1>通知中心</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="service-status"><span class="status-dot"></span>服务已连接</span>
+        <form method="post" action="/admin/logout">
+          <button class="button button-secondary" type="submit">退出</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="summary-grid" aria-label="公告概览">
+        <article class="summary-card">
+          <span>全部条目</span>
+          <strong id="summary-total">0</strong>
+        </article>
+        <article class="summary-card">
+          <span>正在发布</span>
+          <strong id="summary-published">0</strong>
+        </article>
+        <article class="summary-card">
+          <span>草稿</span>
+          <strong id="summary-drafts">0</strong>
+        </article>
+        <article class="summary-card summary-card-endpoint">
+          <span>客户端接口</span>
+          <code>/v1/announcements</code>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel announcement-browser" aria-label="公告列表">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">公告库</p>
+              <h2>内容与语言版本</h2>
+            </div>
+            <button id="new-record-button" class="button button-primary" type="button">新建</button>
+          </div>
+
+          <label class="search-field" for="record-search">
+            <span class="visually-hidden">搜索公告</span>
+            <input id="record-search" type="search" placeholder="搜索标题、编号或语言" />
+          </label>
+
+          <div id="record-list" class="record-list" aria-live="polite"></div>
+          <div id="record-empty" class="empty-state" hidden>
+            <div class="empty-symbol" aria-hidden="true">＋</div>
+            <h3>还没有公告</h3>
+            <p>点击“新建”，保存后即可发布给新版本客户端。</p>
+          </div>
+        </aside>
+
+        <section class="panel editor-panel" aria-labelledby="editor-title">
+          <div class="panel-heading editor-heading">
+            <div>
+              <p id="editor-mode" class="eyebrow">新公告</p>
+              <h2 id="editor-title">编辑内容</h2>
+            </div>
+            <span id="save-state" class="save-state">尚未保存</span>
+          </div>
+
+          <form id="announcement-form" class="announcement-form">
+            <fieldset>
+              <legend>显示规则</legend>
+              <div class="form-grid form-grid-three">
+                <label>
+                  <span>公告编号</span>
+                  <input id="record-id" name="id" type="number" min="1" inputmode="numeric" required />
+                  <small>同一公告的不同语言使用相同编号</small>
+                </label>
+                <label>
+                  <span>通知级别</span>
+                  <select id="record-type" name="type">
+                    <option value="info">普通 · 设置页展示</option>
+                    <option value="warning">提醒 · 新公告时弹出</option>
+                    <option value="blocking">重要 · 每次启动弹出</option>
+                  </select>
+                </label>
+                <label>
+                  <span>发布状态</span>
+                  <span class="switch-row">
+                    <input id="record-enabled" name="enabled" type="checkbox" />
+                    <span>立即发布</span>
+                  </span>
+                  <small>关闭时仅保存为草稿</small>
+                </label>
+              </div>
+
+              <div class="form-grid form-grid-two">
+                <label>
+                  <span>目标语言</span>
+                  <input
+                    id="record-language"
+                    name="language"
+                    type="text"
+                    list="language-options"
+                    placeholder="留空表示全部语言"
+                  />
+                  <datalist id="language-options">
+                    <option value="zh-Hans"></option>
+                    <option value="zh-Hant"></option>
+                    <option value="en"></option>
+                    <option value="ja"></option>
+                    <option value="fr"></option>
+                    <option value="es"></option>
+                    <option value="ru"></option>
+                    <option value="ar"></option>
+                  </datalist>
+                </label>
+                <label>
+                  <span>目标平台</span>
+                  <select id="record-platform" name="platform">
+                    <option value="">iOS 与 watchOS</option>
+                    <option value="iOS">仅 iOS</option>
+                    <option value="watchOS">仅 watchOS</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="form-grid form-grid-two">
+                <label>
+                  <span>最低构建号</span>
+                  <input id="record-min-build" name="min_build" type="number" min="0" placeholder="不限制" />
+                </label>
+                <label>
+                  <span>最高构建号</span>
+                  <input id="record-max-build" name="max_build" type="number" min="0" placeholder="不限制" />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>公告内容</legend>
+              <label>
+                <span>标题</span>
+                <input id="record-title" name="title" type="text" maxlength="200" required />
+              </label>
+              <label>
+                <span>正文</span>
+                <textarea id="record-body" name="body" rows="11" maxlength="20000" required></textarea>
+                <small><span id="body-count">0</span> / 20000</small>
+              </label>
+            </fieldset>
+
+            <section class="preview-section" aria-labelledby="preview-title">
+              <div class="preview-heading">
+                <span id="preview-type" class="type-badge type-info">普通</span>
+                <span id="preview-audience" class="preview-audience">全部语言 · 双平台</span>
+              </div>
+              <h3 id="preview-title">公告标题预览</h3>
+              <p id="preview-body">公告正文会显示在这里。</p>
+            </section>
+
+            <div class="form-actions">
+              <div class="secondary-actions">
+                <button id="duplicate-button" class="button button-secondary" type="button" disabled>
+                  复制为语言版本
+                </button>
+                <button id="delete-button" class="button button-danger" type="button" disabled>删除</button>
+              </div>
+              <button class="button button-primary button-save" type="submit">保存更改</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

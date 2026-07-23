@@ -1,8 +1,10 @@
-# ELS Feedback Proxy
+# ELS Feedback & Notification Service
 
-面向 `ETOS LLM Studio` 的独立反馈代理服务。客户端通过本服务提交反馈和查询工单状态，本服务再调用 GitHub Issues API。
+面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单与客户端公告，后续遥测等服务可继续按 `/v1/<module>` 拆分接入同一域名。
 
 ## 功能概览
+- `GET /v1/announcements`：返回已发布的客户端公告，支持 ETag 与 Cloudflare 边缘缓存
+- `GET /admin/announcements`：受管理口令保护的公告编辑 WebUI
 - `POST /v1/feedback/challenge`：下发一次性 challenge（120 秒有效）
 - `POST /v1/feedback/issues`：校验签名后先走 LLM 审核，再创建 GitHub Issue（可能为隐藏内容工单）
 - `POST /v1/feedback/issues/:issue_number/comments`：在指定工单下发送评论（同样经过签名与 LLM 审核）
@@ -10,6 +12,8 @@
 - `GET /v1/healthz`：健康检查
 - `POST /v1/admin/self-update`：受保护的自更新 webhook，下载指定 tag 的 Release 产物并替换当前二进制
 - `GET /v1/admin/self-update/status`：查看自动更新器状态（同样需要鉴权）
+
+公告与反馈统一由 `https://feedback.els.ericterminal.com` 提供。公告管理数据保存在 `DATA_DIR/announcements.json`，客户端只能读取已发布条目，草稿和管理字段不会进入公开响应。
 
 ## 安全策略（方案B）
 - UA 校验：必须包含 `ETOS LLM Studio`（兼容 `%20` 编码）
@@ -52,6 +56,7 @@
 - `REDIS_PASSWORD`：Redis 密码（可选）
 - `REDIS_DB`：Redis DB（默认 `0`）
 - `REDIS_KEY_PREFIX`：Redis Key 前缀（默认 `els-feedback`）
+- `TRUSTED_PROXY_CIDRS`：可信反向代理网段（默认仅本机）；Tunnel 在其他主机时应填写其内网地址，例如 `192.168.31.101/32`
 - `COMMENT_LIMIT_PER_WINDOW`：评论限流（默认 `20`，每 15 分钟）
 - `SELF_UPDATE_SECRET`：自动更新 webhook 密钥；留空则禁用自动更新接口
 - `SELF_UPDATE_REPO_OWNER`：自动更新下载源仓库 owner（默认 `Eric-Terminal`）
@@ -59,8 +64,42 @@
 - `SELF_UPDATE_GITHUB_TOKEN`：自动更新读取 Release 时使用的 GitHub Token（可选，公开仓库可不填）
 - `SELF_UPDATE_SERVICE_NAME`：更新完成后重启的 systemd 服务名（默认 `els-feedback-proxy`）
 - `SELF_UPDATE_WORKING_DIR`：自动更新工作目录（可选，默认取当前可执行文件所在目录）
+- `ANNOUNCEMENT_ADMIN_TOKEN`：公告管理口令（至少 16 个字符）；留空时不注册管理页面和管理 API
+- `ANNOUNCEMENT_CACHE_MAX_AGE_SECONDS`：Cloudflare 边缘缓存秒数（默认 `300`，范围 `30~3600`）
+- `ADMIN_LOGIN_LIMIT_PER_WINDOW`：管理页面每 IP 登录尝试上限（默认 `10`，每 15 分钟）
 
 当配置 `REDIS_ADDR` 且可连通时，限流与去重会自动升级为 Redis 全局模式；连接失败会自动回退到内存模式。
+
+## 公告管理
+
+配置 `ANNOUNCEMENT_ADMIN_TOKEN` 并重启后，访问：
+
+```text
+https://feedback.els.ericterminal.com/admin/announcements
+```
+
+管理页面支持：
+
+- 创建、编辑和删除公告
+- 保存草稿或立即发布
+- 为同一公告复制不同语言版本
+- 限制 iOS、watchOS、最低构建号和最高构建号
+- 预览客户端标题、正文与通知级别
+
+公告编号相同的条目会被客户端视为同一公告的语言版本。客户端按语言选择最佳匹配项；需要同时发布多条独立公告时，使用不同编号。
+
+## Cloudflare 缓存与防护
+
+服务会为 `/v1/announcements` 返回独立的浏览器缓存和 `Cloudflare-CDN-Cache-Control` 响应头，并提供内容 ETag。建议在 Cloudflare Cache Rules 中将该路径设置为可缓存，同时让反馈提交、管理页面和管理 API 保持绕过缓存。
+
+推荐规则：
+
+- `/v1/announcements`：Eligible for cache，Edge TTL 遵循源站缓存控制
+- `/admin/*`、`/v1/admin/*`：Bypass cache，并使用 Cloudflare Access 保护浏览器管理入口
+- `/v1/feedback/*`、`/v1/github/webhooks`：Bypass cache
+- 在 Cloudflare Rate Limiting Rules 中为 challenge、提交、评论和登录入口设置边缘限流；源站仍保留 Redis 限流与 PoW 作为第二层保护
+
+Cloudflare Tunnel 隐藏了家庭网络源站地址。不要额外把服务端口映射到公网，内网直连仅用于运维。
 
 ## 本地运行
 ```bash
@@ -88,15 +127,18 @@ docker compose up -d --build
 
 1. 本仓库 push 新 tag，例如 `v0.1.4`
 2. GitHub Actions 运行测试并通过 GoReleaser 生成 Release 资产
-3. Workflow 向生产环境 `POST /v1/admin/self-update`
-4. 服务端根据 tag 调用 GitHub Releases API，自动下载适用于当前机器的 `linux_amd64` 归档与 `checksums.txt`
+3. GitHub `release` webhook 向生产环境发送 `published` 事件
+4. 服务端校验 webhook 签名后，根据 tag 调用 GitHub Releases API，自动下载适用于当前机器的归档与 `checksums.txt`
 5. 服务端校验 SHA256、备份当前二进制、原地替换并调度 `systemctl restart`
 
 这样服务器不需要安装 Go 工具链，也不会在生产机上重新编译。
 
-### GitHub Actions Secrets
-- `DEPLOY_WEBHOOK_URL`：生产 webhook 地址，例如 `https://feedback.els.ericterminal.com/v1/admin/self-update`
-- `DEPLOY_WEBHOOK_SECRET`：与服务器 `SELF_UPDATE_SECRET` 相同的密钥
+### GitHub Webhook
+
+- Payload URL：`https://feedback.els.ericterminal.com/v1/github/webhooks`
+- Content type：`application/json`
+- Event：`Releases`
+- Secret：与服务器 `GITHUB_WEBHOOK_SECRET` 相同
 
 ### 健康检查返回
 `GET /v1/healthz` 现在会额外返回：
