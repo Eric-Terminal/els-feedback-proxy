@@ -13,6 +13,7 @@ import (
 // Config 运行时配置
 type Config struct {
 	Port                     string
+	AdminListenAddr          string
 	GitHubToken              string
 	GitHubOwner              string
 	GitHubRepo               string
@@ -60,6 +61,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port:                     getEnv("PORT", "8080"),
+		AdminListenAddr:          strings.TrimSpace(os.Getenv("ADMIN_LISTEN_ADDR")),
 		GitHubToken:              os.Getenv("GITHUB_TOKEN"),
 		GitHubOwner:              getEnv("GITHUB_OWNER", "Eric-Terminal"),
 		GitHubRepo:               getEnv("GITHUB_REPO", "ETOS-LLM-Studio"),
@@ -109,6 +111,11 @@ func Load() (Config, error) {
 	if cfg.AnnouncementAdminToken != "" && len(cfg.AnnouncementAdminToken) < 16 {
 		return Config{}, errors.New("ANNOUNCEMENT_ADMIN_TOKEN 至少需要 16 个字符")
 	}
+	if cfg.AnnouncementAdminToken != "" || cfg.SelfUpdateSecret != "" {
+		if err := validateAdminListenAddr(cfg.AdminListenAddr); err != nil {
+			return Config{}, err
+		}
+	}
 	for _, trustedProxy := range cfg.TrustedProxyCIDRs {
 		if _, _, err := net.ParseCIDR(trustedProxy); err != nil {
 			return Config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS 包含无效网段 %q", trustedProxy)
@@ -128,6 +135,25 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func validateAdminListenAddr(address string) error {
+	if address == "" {
+		return errors.New("启用管理功能时必须配置 ADMIN_LISTEN_ADDR")
+	}
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || port == "" {
+		return errors.New("ADMIN_LISTEN_ADDR 必须使用内网 IP:端口格式")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || (!ip.IsPrivate() && !ip.IsLoopback()) {
+		return errors.New("ADMIN_LISTEN_ADDR 只能绑定内网或回环 IP")
+	}
+	if parsedPort, err := strconv.Atoi(port); err != nil || parsedPort < 1 || parsedPort > 65535 {
+		return errors.New("ADMIN_LISTEN_ADDR 端口无效")
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {

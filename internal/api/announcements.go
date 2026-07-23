@@ -22,12 +22,11 @@ func (s *Server) registerAnnouncementRoutes() {
 	}
 
 	s.engine.GET("/v1/announcements", s.handleListAnnouncements)
-	if !s.announcementAdminEnabled() {
-		return
-	}
+}
 
+func (s *Server) registerAnnouncementAdminRoutes() {
 	s.registerAnnouncementAdminUIRoutes()
-	adminAPI := s.engine.Group("/v1/admin/announcements")
+	adminAPI := s.adminEngine.Group("/v1/admin/announcements")
 	adminAPI.Use(s.requireAnnouncementAdmin)
 	adminAPI.GET("", s.handleAdminListAnnouncements)
 	adminAPI.POST("", s.handleAdminCreateAnnouncement)

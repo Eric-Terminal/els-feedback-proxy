@@ -4,14 +4,14 @@
 
 ## 功能概览
 - `GET /v1/announcements`：返回已发布的客户端公告，支持 ETag 与 Cloudflare 边缘缓存
-- `GET /admin/announcements`：受管理口令保护的公告编辑 WebUI
+- `GET http://<内网地址>/admin/announcements`：仅由内网管理监听器提供的公告编辑 WebUI
 - `POST /v1/feedback/challenge`：下发一次性 challenge（120 秒有效）
 - `POST /v1/feedback/issues`：校验签名后先走 LLM 审核，再创建 GitHub Issue（可能为隐藏内容工单）
 - `POST /v1/feedback/issues/:issue_number/comments`：在指定工单下发送评论（同样经过签名与 LLM 审核）
 - `GET /v1/feedback/issues/:issue_number`：校验 ticket token 后返回过滤后的状态与公开评论
 - `GET /v1/healthz`：健康检查
-- `POST /v1/admin/self-update`：受保护的自更新 webhook，下载指定 tag 的 Release 产物并替换当前二进制
-- `GET /v1/admin/self-update/status`：查看自动更新器状态（同样需要鉴权）
+- `POST /v1/admin/self-update`：仅内网可用的自更新接口，下载指定 tag 的 Release 产物并替换当前二进制
+- `GET /v1/admin/self-update/status`：仅内网可用的自动更新器状态接口
 
 公告与反馈统一由 `https://feedback.els.ericterminal.com` 提供。公告管理数据保存在 `DATA_DIR/announcements.json`，客户端只能读取已发布条目，草稿和管理字段不会进入公开响应。
 
@@ -37,6 +37,7 @@
 
 ## 环境变量
 - `PORT`：监听端口（默认 `8080`）
+- `ADMIN_LISTEN_ADDR`：管理服务监听地址；启用公告管理或自更新时必填，且只接受内网或回环 IP，例如 `192.168.31.102:8521`
 - `GITHUB_TOKEN`：Fine-grained PAT（必填）
 - `GITHUB_OWNER`：默认 `Eric-Terminal`
 - `GITHUB_REPO`：默认 `ETOS-LLM-Studio`
@@ -64,7 +65,7 @@
 - `SELF_UPDATE_GITHUB_TOKEN`：自动更新读取 Release 时使用的 GitHub Token（可选，公开仓库可不填）
 - `SELF_UPDATE_SERVICE_NAME`：更新完成后重启的 systemd 服务名（默认 `els-feedback-proxy`）
 - `SELF_UPDATE_WORKING_DIR`：自动更新工作目录（可选，默认取当前可执行文件所在目录）
-- `ANNOUNCEMENT_ADMIN_TOKEN`：公告管理口令（至少 16 个字符）；留空时不注册管理页面和管理 API
+- `ANNOUNCEMENT_ADMIN_TOKEN`：公告管理口令（至少 16 个字符）；留空时不启动公告管理页面和管理 API
 - `ANNOUNCEMENT_CACHE_MAX_AGE_SECONDS`：Cloudflare 边缘缓存秒数（默认 `300`，范围 `30~3600`）
 - `ADMIN_LOGIN_LIMIT_PER_WINDOW`：管理页面每 IP 登录尝试上限（默认 `10`，每 15 分钟）
 
@@ -72,11 +73,19 @@
 
 ## 公告管理
 
-配置 `ANNOUNCEMENT_ADMIN_TOKEN` 并重启后，访问：
+配置 `ANNOUNCEMENT_ADMIN_TOKEN` 和内网管理监听地址：
 
 ```text
-https://feedback.els.ericterminal.com/admin/announcements
+ADMIN_LISTEN_ADDR=192.168.31.102:8521
 ```
+
+然后在同一局域网内访问：
+
+```text
+http://192.168.31.102:8521/admin/announcements
+```
+
+公网监听器不会注册 `/admin/*` 和 `/v1/admin/*`。Cloudflare Tunnel 继续只转发公开端口，不需要根据 `CF-*` 请求头判断访问来源，也不要为管理端口添加 Tunnel 路由或公网端口映射。
 
 管理页面支持：
 
@@ -90,16 +99,15 @@ https://feedback.els.ericterminal.com/admin/announcements
 
 ## Cloudflare 缓存与防护
 
-服务会为 `/v1/announcements` 返回独立的浏览器缓存和 `Cloudflare-CDN-Cache-Control` 响应头，并提供内容 ETag。建议在 Cloudflare Cache Rules 中将该路径设置为可缓存，同时让反馈提交、管理页面和管理 API 保持绕过缓存。
+服务会为 `/v1/announcements` 返回独立的浏览器缓存和 `Cloudflare-CDN-Cache-Control` 响应头，并提供内容 ETag。建议在 Cloudflare Cache Rules 中将该路径设置为可缓存，同时让反馈提交接口保持绕过缓存。
 
 推荐规则：
 
 - `/v1/announcements`：Eligible for cache，Edge TTL 遵循源站缓存控制
-- `/admin/*`、`/v1/admin/*`：Bypass cache，并使用 Cloudflare Access 保护浏览器管理入口
 - `/v1/feedback/*`、`/v1/github/webhooks`：Bypass cache
-- 在 Cloudflare Rate Limiting Rules 中为 challenge、提交、评论和登录入口设置边缘限流；源站仍保留 Redis 限流与 PoW 作为第二层保护
+- 在 Cloudflare Rate Limiting Rules 中为 challenge、提交和评论入口设置边缘限流；源站仍保留 Redis 限流与 PoW 作为第二层保护
 
-Cloudflare Tunnel 隐藏了家庭网络源站地址。不要额外把服务端口映射到公网，内网直连仅用于运维。
+Cloudflare Tunnel 隐藏了家庭网络源站地址。不要把公开端口或管理端口映射到家庭公网；管理端口只能通过局域网直连。
 
 ## 本地运行
 ```bash

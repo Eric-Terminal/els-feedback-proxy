@@ -117,6 +117,9 @@ func main() {
 		buildinfo.Commit,
 		buildinfo.BuildTime,
 	)
+	if cfg.AdminListenAddr != "" {
+		log.Printf("内网管理服务启动: %s", cfg.AdminListenAddr)
+	}
 	if err := srv.Run(); err != nil {
 		log.Fatalf("服务异常退出: %v", err)
 	}

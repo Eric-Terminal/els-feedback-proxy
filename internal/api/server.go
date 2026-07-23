@@ -41,6 +41,7 @@ type Server struct {
 	archives      *store.BlockedArchiveStore
 	developers    map[string]struct{}
 	engine        *gin.Engine
+	adminEngine   *gin.Engine
 }
 
 type selfUpdateController interface {
@@ -80,12 +81,18 @@ func NewServer(
 		reviewer = moderation.AllowAllReviewer{}
 	}
 
-	engine := gin.New()
-	if err := engine.SetTrustedProxies(cfg.TrustedProxyCIDRs); err != nil {
+	publicEngine := gin.New()
+	if err := publicEngine.SetTrustedProxies(cfg.TrustedProxyCIDRs); err != nil {
 		panic(fmt.Sprintf("设置可信代理失败: %v", err))
 	}
-	engine.ForwardedByClientIP = true
-	engine.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"}
+	publicEngine.ForwardedByClientIP = true
+	publicEngine.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"}
+
+	adminEngine := gin.New()
+	if err := adminEngine.SetTrustedProxies(nil); err != nil {
+		panic(fmt.Sprintf("设置管理服务代理策略失败: %v", err))
+	}
+	adminEngine.ForwardedByClientIP = false
 
 	server := &Server{
 		cfg:           cfg,
@@ -100,17 +107,31 @@ func NewServer(
 		reviewer:      reviewer,
 		archives:      archives,
 		developers:    buildDeveloperLoginSet(cfg),
-		engine:        engine,
+		engine:        publicEngine,
+		adminEngine:   adminEngine,
 	}
 
 	server.engine.Use(gin.Recovery())
+	server.adminEngine.Use(gin.Recovery())
 	server.registerRoutes()
+	server.registerAdminRoutes()
 
 	return server
 }
 
 func (s *Server) Run() error {
-	return s.engine.Run(":" + s.cfg.Port)
+	if !s.adminServerEnabled() {
+		return s.engine.Run(":" + s.cfg.Port)
+	}
+
+	errors := make(chan error, 2)
+	go func() {
+		errors <- fmt.Errorf("公共服务监听失败: %w", s.engine.Run(":"+s.cfg.Port))
+	}()
+	go func() {
+		errors <- fmt.Errorf("内网管理服务监听失败: %w", s.adminEngine.Run(s.cfg.AdminListenAddr))
+	}()
+	return <-errors
 }
 
 func (s *Server) registerRoutes() {
@@ -135,10 +156,21 @@ func (s *Server) registerRoutes() {
 	if s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "" {
 		s.engine.POST("/v1/github/webhooks", s.handleGitHubWebhook)
 	}
-	if s.selfUpdater != nil {
-		s.engine.POST("/v1/admin/self-update", s.handleSelfUpdate)
-		s.engine.GET("/v1/admin/self-update/status", s.handleSelfUpdateStatus)
+}
+
+func (s *Server) registerAdminRoutes() {
+	if s.announcementAdminEnabled() {
+		s.registerAnnouncementAdminRoutes()
 	}
+	if s.selfUpdater != nil {
+		s.adminEngine.POST("/v1/admin/self-update", s.handleSelfUpdate)
+		s.adminEngine.GET("/v1/admin/self-update/status", s.handleSelfUpdateStatus)
+	}
+}
+
+func (s *Server) adminServerEnabled() bool {
+	return strings.TrimSpace(s.cfg.AdminListenAddr) != "" &&
+		(s.announcementAdminEnabled() || s.selfUpdater != nil)
 }
 
 func (s *Server) handleChallenge(c *gin.Context) {

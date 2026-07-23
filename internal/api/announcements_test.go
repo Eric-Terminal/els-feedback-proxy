@@ -146,21 +146,21 @@ func TestAnnouncementAdminLoginCreatesProtectedSession(t *testing.T) {
 	)
 	loginRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	loginResponse := httptest.NewRecorder()
-	server.engine.ServeHTTP(loginResponse, loginRequest)
+	server.adminEngine.ServeHTTP(loginResponse, loginRequest)
 
 	if loginResponse.Code != http.StatusSeeOther {
 		t.Fatalf("登录成功应返回 303，实际 %d", loginResponse.Code)
 	}
 	cookies := loginResponse.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].Name != announcementAdminCookieName ||
-		!cookies[0].HttpOnly || !cookies[0].Secure {
+		!cookies[0].HttpOnly || cookies[0].Secure {
 		t.Fatalf("管理会话 Cookie 安全属性不正确: %+v", cookies)
 	}
 
 	pageRequest := httptest.NewRequest(http.MethodGet, "/admin/announcements", nil)
 	pageRequest.AddCookie(cookies[0])
 	pageResponse := httptest.NewRecorder()
-	server.engine.ServeHTTP(pageResponse, pageRequest)
+	server.adminEngine.ServeHTTP(pageResponse, pageRequest)
 	if pageResponse.Code != http.StatusOK ||
 		!strings.Contains(pageResponse.Body.String(), "内容与语言版本") {
 		t.Fatalf("登录后未返回管理页面: code=%d body=%s", pageResponse.Code, pageResponse.Body.String())
@@ -176,9 +176,30 @@ func TestAnnouncementAdminLoginCreatesProtectedSession(t *testing.T) {
 	crossOriginRequest.Header.Set("Content-Type", "application/json")
 	crossOriginRequest.AddCookie(cookies[0])
 	crossOriginResponse := httptest.NewRecorder()
-	server.engine.ServeHTTP(crossOriginResponse, crossOriginRequest)
+	server.adminEngine.ServeHTTP(crossOriginResponse, crossOriginRequest)
 	if crossOriginResponse.Code != http.StatusForbidden {
 		t.Fatalf("跨站管理请求应被拒绝，实际 %d", crossOriginResponse.Code)
+	}
+}
+
+func TestPublicListenerDoesNotRegisterAdminRoutes(t *testing.T) {
+	server := newAnnouncementTestServer(t, "browser-admin-token")
+
+	for _, path := range []string{"/admin/announcements", "/v1/admin/announcements"} {
+		response := httptest.NewRecorder()
+		server.engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("公网监听器不应注册 %s，实际返回 %d", path, response.Code)
+		}
+	}
+
+	adminResponse := httptest.NewRecorder()
+	server.adminEngine.ServeHTTP(
+		adminResponse,
+		httptest.NewRequest(http.MethodGet, "/admin/announcements", nil),
+	)
+	if adminResponse.Code != http.StatusOK {
+		t.Fatalf("内网管理监听器应提供登录页，实际返回 %d", adminResponse.Code)
 	}
 }
 
@@ -190,6 +211,7 @@ func newAnnouncementTestServer(t *testing.T, adminToken string) *Server {
 	}
 	return NewServer(
 		config.Config{
+			AdminListenAddr:          "127.0.0.1:8081",
 			AnnouncementAdminToken:   adminToken,
 			AnnouncementCacheMaxAge:  300,
 			AdminLoginLimitPerWindow: 10,
@@ -219,6 +241,6 @@ func performAdminRequest(
 		request.Header.Set("Content-Type", "application/json")
 	}
 	response := httptest.NewRecorder()
-	server.engine.ServeHTTP(response, request)
+	server.adminEngine.ServeHTTP(response, request)
 	return response
 }

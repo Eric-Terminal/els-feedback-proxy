@@ -30,18 +30,20 @@ var announcementLoginTemplate = template.Must(
 )
 
 func (s *Server) announcementAdminEnabled() bool {
-	return s.announcements != nil && strings.TrimSpace(s.cfg.AnnouncementAdminToken) != ""
+	return s.announcements != nil &&
+		strings.TrimSpace(s.cfg.AnnouncementAdminToken) != "" &&
+		strings.TrimSpace(s.cfg.AdminListenAddr) != ""
 }
 
 func (s *Server) registerAnnouncementAdminUIRoutes() {
-	s.engine.GET("/admin", func(c *gin.Context) {
+	s.adminEngine.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusTemporaryRedirect, "/admin/announcements")
 	})
-	s.engine.GET("/admin/announcements", s.handleAnnouncementAdminPage)
-	s.engine.POST("/admin/login", s.handleAnnouncementAdminLogin)
-	s.engine.POST("/admin/logout", s.handleAnnouncementAdminLogout)
-	s.engine.GET("/admin/assets/admin.css", serveAnnouncementAdminAsset("admin.css", "text/css; charset=utf-8"))
-	s.engine.GET(
+	s.adminEngine.GET("/admin/announcements", s.handleAnnouncementAdminPage)
+	s.adminEngine.POST("/admin/login", s.handleAnnouncementAdminLogin)
+	s.adminEngine.POST("/admin/logout", s.handleAnnouncementAdminLogout)
+	s.adminEngine.GET("/admin/assets/admin.css", serveAnnouncementAdminAsset("admin.css", "text/css; charset=utf-8"))
+	s.adminEngine.GET(
 		"/admin/assets/admin.js",
 		serveAnnouncementAdminAsset("admin.js", "text/javascript; charset=utf-8"),
 	)
@@ -100,7 +102,7 @@ func (s *Server) handleAnnouncementAdminLogin(c *gin.Context) {
 		Expires:  expiresAt,
 		MaxAge:   int(announcementAdminSessionTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   c.Request.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
 	c.Redirect(http.StatusSeeOther, "/admin/announcements")
@@ -113,7 +115,7 @@ func (s *Server) handleAnnouncementAdminLogout(c *gin.Context) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   c.Request.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
 	c.Redirect(http.StatusSeeOther, "/admin/announcements")
