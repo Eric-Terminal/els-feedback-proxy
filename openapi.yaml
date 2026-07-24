@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ELS Feedback & Notification API
-  version: 3.0.0
+  version: 3.1.0
 servers:
   - url: https://feedback.els.ericterminal.com
 paths:
@@ -122,6 +122,195 @@ paths:
           description: 公告已删除
         '404':
           description: 公告不存在
+  /v1/surveys:
+    get:
+      summary: 获取已发布的意见征集
+      responses:
+        '200':
+          description: 意见征集数组；没有征集时返回空数组
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cloudflare-CDN-Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicSurvey'
+        '304':
+          description: 意见征集内容未变化
+  /v1/surveys/challenge:
+    post:
+      summary: 获取匿名答卷提交 challenge
+      responses:
+        '200':
+          description: challenge 已生成，结构与反馈 challenge 相同
+  /v1/surveys/{key}/responses:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+    post:
+      summary: 提交匿名答卷
+      parameters:
+        - in: header
+          name: X-ELS-Challenge-Id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Timestamp
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-Signature
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-PoW-Nonce
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-ELS-PoW-Hash
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SurveyResponseInput'
+      responses:
+        '201':
+          description: 匿名答卷已保存
+        '400':
+          description: 答卷字段无效
+        '401':
+          description: 签名、challenge 或 PoW 校验失败
+        '410':
+          description: 意见征集已停止
+        '429':
+          description: 触发限流
+  /v1/admin/surveys:
+    get:
+      summary: 获取全部意见征集管理记录
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 意见征集管理记录
+    post:
+      summary: 创建意见征集
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SurveyRecordInput'
+      responses:
+        '201':
+          description: 意见征集已创建
+        '400':
+          description: 意见征集字段无效
+  /v1/admin/surveys/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+    put:
+      summary: 更新意见征集
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SurveyRecordInput'
+      responses:
+        '200':
+          description: 意见征集已更新
+        '409':
+          description: 已有答卷，不能修改题目内容
+    delete:
+      summary: 删除未收到答卷的意见征集
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '204':
+          description: 意见征集已删除
+        '409':
+          description: 已有答卷，不能删除
+  /v1/admin/surveys/{key}/results:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+    get:
+      summary: 获取私有匿名答卷
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 意见征集定义、答卷数量和匿名答卷
+        '404':
+          description: 意见征集不存在
   /v1/distribution/manifest:
     get:
       summary: 获取已发布的官方数据清单
@@ -459,6 +648,98 @@ components:
           properties:
             enabled:
               type: boolean
+    PublicSurvey:
+      type: object
+      required: [key, id, title, questions]
+      properties:
+        key:
+          type: string
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        min_build:
+          type: string
+        max_build:
+          type: string
+        language:
+          type: string
+        platform:
+          type: string
+          enum: [iOS, watchOS]
+        questions:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/SurveyQuestion'
+    SurveyQuestion:
+      type: object
+      required: [id, question, type, options]
+      properties:
+        id:
+          type: string
+        question:
+          type: string
+        type:
+          type: string
+          enum: [single_select, multi_select]
+        allow_other:
+          type: boolean
+        required:
+          type: boolean
+        options:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SurveyOption'
+    SurveyOption:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+    SurveyRecordInput:
+      allOf:
+        - $ref: '#/components/schemas/PublicSurvey'
+        - type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+    SurveyResponseInput:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          items:
+            type: object
+            required: [question_id]
+            properties:
+              question_id:
+                type: string
+              selected_option_ids:
+                type: array
+                items:
+                  type: string
+              other_text:
+                type: string
+                maxLength: 1000
+        platform:
+          type: string
+          enum: [iOS, watchOS]
+        app_build:
+          type: string
+        language:
+          type: string
     PublicDistributionManifest:
       type: object
       required: [version, downloads]

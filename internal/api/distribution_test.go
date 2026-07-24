@@ -234,6 +234,7 @@ func newDistributionTestServer(t *testing.T, adminToken string) *Server {
 		nil,
 		nil,
 		distributionStore,
+		nil,
 	)
 }
 

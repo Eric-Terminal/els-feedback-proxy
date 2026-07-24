@@ -185,7 +185,14 @@ func TestAnnouncementAdminLoginCreatesProtectedSession(t *testing.T) {
 func TestPublicListenerDoesNotRegisterAdminRoutes(t *testing.T) {
 	server := newAnnouncementTestServer(t, "browser-admin-token")
 
-	for _, path := range []string{"/", "/admin", "/admin/announcements", "/v1/admin/announcements"} {
+	for _, path := range []string{
+		"/",
+		"/admin",
+		"/admin/announcements",
+		"/admin/surveys",
+		"/v1/admin/announcements",
+		"/v1/admin/surveys",
+	} {
 		response := httptest.NewRecorder()
 		server.engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusNotFound {
@@ -217,6 +224,7 @@ func TestAdminHomeCanIssuePasswordlessWebSession(t *testing.T) {
 		!strings.Contains(homeResponse.Body.String(), "<h2>概览</h2>") ||
 		!strings.Contains(homeResponse.Body.String(), "管理项目") ||
 		!strings.Contains(homeResponse.Body.String(), `href="/admin/announcements"`) ||
+		!strings.Contains(homeResponse.Body.String(), `href="/admin/surveys"`) ||
 		!strings.Contains(homeResponse.Body.String(), `href="/admin/distribution"`) ||
 		!strings.Contains(homeResponse.Body.String(), "内网免登录") {
 		t.Fatalf("免登录管理首页响应不正确: code=%d body=%s", homeResponse.Code, homeResponse.Body.String())
@@ -275,6 +283,7 @@ func newAnnouncementTestServer(t *testing.T, adminToken string) *Server {
 		nil,
 		nil,
 		announcementStore,
+		nil,
 		nil,
 	)
 }

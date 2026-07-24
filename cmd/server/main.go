@@ -103,6 +103,11 @@ func main() {
 		log.Fatalf("官方数据存储初始化失败: %v", err)
 	}
 
+	surveyStore, err := store.NewSurveyStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("意见征集存储初始化失败: %v", err)
+	}
+
 	var reviewer moderation.Reviewer = moderation.AllowAllReviewer{}
 	if cfg.ModerationEnabled {
 		reviewer = moderation.NewOpenAIReviewer(moderation.OpenAIReviewerConfig{
@@ -126,6 +131,7 @@ func main() {
 		blockedArchiveStore,
 		announcementStore,
 		distributionStore,
+		surveyStore,
 	)
 
 	log.Printf(

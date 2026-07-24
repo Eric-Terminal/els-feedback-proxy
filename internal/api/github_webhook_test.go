@@ -167,6 +167,7 @@ func newGitHubWebhookTestServer() *Server {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 }
 

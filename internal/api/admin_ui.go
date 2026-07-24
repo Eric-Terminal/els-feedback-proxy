@@ -43,6 +43,10 @@ var distributionAdminTemplate = template.Must(
 	template.ParseFS(announcementAdminWeb, "web/distribution.html"),
 )
 
+var surveyAdminTemplate = template.Must(
+	template.ParseFS(announcementAdminWeb, "web/survey.html"),
+)
+
 type adminPageData struct {
 	ShowLogout      bool
 	WebAuthDisabled bool
@@ -51,7 +55,7 @@ type adminPageData struct {
 }
 
 func (s *Server) adminInterfaceEnabled() bool {
-	return (s.announcements != nil || s.distribution != nil) &&
+	return (s.announcements != nil || s.distribution != nil || s.surveys != nil) &&
 		strings.TrimSpace(s.cfg.AnnouncementAdminToken) != "" &&
 		strings.TrimSpace(s.cfg.AdminListenAddr) != ""
 }
@@ -62,6 +66,7 @@ func (s *Server) registerAdminUIRoutes() {
 	s.adminEngine.GET("/admin/", s.handleAdminHomePage)
 	s.adminEngine.GET("/admin/announcements", s.handleAnnouncementAdminPage)
 	s.adminEngine.GET("/admin/distribution", s.handleDistributionAdminPage)
+	s.adminEngine.GET("/admin/surveys", s.handleSurveyAdminPage)
 	s.adminEngine.POST("/admin/login", s.handleAnnouncementAdminLogin)
 	s.adminEngine.POST("/admin/logout", s.handleAnnouncementAdminLogout)
 	s.adminEngine.GET("/admin/assets/admin.css", serveAnnouncementAdminAsset("admin.css", "text/css; charset=utf-8"))
@@ -72,6 +77,10 @@ func (s *Server) registerAdminUIRoutes() {
 	s.adminEngine.GET(
 		"/admin/assets/distribution.js",
 		serveAnnouncementAdminAsset("distribution.js", "text/javascript; charset=utf-8"),
+	)
+	s.adminEngine.GET(
+		"/admin/assets/survey.js",
+		serveAnnouncementAdminAsset("survey.js", "text/javascript; charset=utf-8"),
 	)
 }
 
@@ -109,6 +118,21 @@ func (s *Server) handleDistributionAdminPage(c *gin.Context) {
 	if err := distributionAdminTemplate.ExecuteTemplate(
 		c.Writer,
 		"distribution.html",
+		s.adminPageData(),
+	); err != nil {
+		c.Status(http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleSurveyAdminPage(c *gin.Context) {
+	writeAnnouncementAdminPageHeaders(c)
+	if !s.prepareAdminPageSession(c) {
+		return
+	}
+
+	if err := surveyAdminTemplate.ExecuteTemplate(
+		c.Writer,
+		"survey.html",
 		s.adminPageData(),
 	); err != nil {
 		c.Status(http.StatusInternalServerError)

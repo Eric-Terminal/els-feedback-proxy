@@ -37,6 +37,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) (bool, error)
 		return true, runAnnouncement(args[1:], stdin, stdout, stderr)
 	case "distribution":
 		return true, runDistribution(args[1:], stdout, stderr)
+	case "survey", "surveys":
+		return true, runSurvey(args[1:], stdin, stdout, stderr)
 	case "help", "--help", "-h":
 		writeRootHelp(stdout)
 		return true, nil
@@ -274,7 +276,7 @@ func readRequestBody(path string, stdin io.Reader) ([]byte, error) {
 	} else {
 		file, err := os.Open(path)
 		if err != nil {
-			return nil, fmt.Errorf("打开公告文件失败: %w", err)
+			return nil, fmt.Errorf("打开 JSON 文件失败: %w", err)
 		}
 		defer file.Close()
 		reader = file
@@ -282,13 +284,13 @@ func readRequestBody(path string, stdin io.Reader) ([]byte, error) {
 
 	body, err := io.ReadAll(io.LimitReader(reader, maxCLIRequestBody+1))
 	if err != nil {
-		return nil, fmt.Errorf("读取公告 JSON 失败: %w", err)
+		return nil, fmt.Errorf("读取 JSON 失败: %w", err)
 	}
 	if len(body) > maxCLIRequestBody {
-		return nil, errors.New("公告 JSON 超过 64 KiB")
+		return nil, errors.New("JSON 超过 64 KiB")
 	}
 	if !json.Valid(body) {
-		return nil, errors.New("公告文件不是有效 JSON")
+		return nil, errors.New("文件不是有效 JSON")
 	}
 	return body, nil
 }
@@ -309,6 +311,7 @@ func writeRootHelp(writer io.Writer) {
 用法:
   els-feedback-proxy                         启动服务
   els-feedback-proxy announcement <命令>    通过管理 API 操作公告
+  els-feedback-proxy survey <命令>          通过管理 API 操作意见征集
   els-feedback-proxy distribution <命令>    通过管理 API 操作官方数据
 
 使用对应命令的 --help 查看详细用法。`)

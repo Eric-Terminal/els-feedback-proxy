@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ELS 意见征集</title>
+    <link rel="stylesheet" href="/admin/assets/admin.css" />
+    <script src="/admin/assets/survey.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="app-mark app-mark-small" aria-hidden="true">ELS</div>
+        <div>
+          <p class="eyebrow">ETOS LLM Studio</p>
+          <h1>意见征集</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <nav class="admin-nav" aria-label="管理页面">
+          <a class="admin-nav-link" href="/">概览</a>
+          <a class="admin-nav-link" href="/admin/announcements">公告</a>
+          <a class="admin-nav-link is-active" href="/admin/surveys" aria-current="page">意见征集</a>
+          <a class="admin-nav-link" href="/admin/distribution">官方数据</a>
+        </nav>
+        <span class="service-status"><span class="status-dot"></span>服务已连接</span>
+        {{if .ShowLogout}}
+        <form method="post" action="/admin/logout">
+          <button class="button button-secondary" type="submit">退出</button>
+        </form>
+        {{end}}
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="summary-grid" aria-label="意见征集概览">
+        <article class="summary-card">
+          <span>全部征集</span>
+          <strong id="summary-total">0</strong>
+        </article>
+        <article class="summary-card">
+          <span>正在征集</span>
+          <strong id="summary-published">0</strong>
+        </article>
+        <article class="summary-card">
+          <span>当前答卷</span>
+          <strong id="summary-responses">0</strong>
+        </article>
+        <article class="summary-card summary-card-endpoint">
+          <span>客户端接口</span>
+          <code>/v1/surveys</code>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel announcement-browser" aria-label="意见征集列表">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">征集库</p>
+              <h2>稿件与语言版本</h2>
+            </div>
+            <button id="new-record-button" class="button button-primary" type="button">新建</button>
+          </div>
+
+          <label class="search-field" for="record-search">
+            <span class="visually-hidden">搜索意见征集</span>
+            <input id="record-search" type="search" placeholder="搜索标题、编号或语言" />
+          </label>
+
+          <div id="record-list" class="record-list" aria-live="polite"></div>
+          <div id="record-empty" class="empty-state" hidden>
+            <div class="empty-symbol" aria-hidden="true">?</div>
+            <h3>还没有意见征集</h3>
+            <p>新建一份稿件，添加问题后即可发布给客户端。</p>
+          </div>
+        </aside>
+
+        <section class="panel editor-panel" aria-labelledby="editor-title">
+          <div class="panel-heading editor-heading">
+            <div>
+              <p id="editor-mode" class="eyebrow">新征集</p>
+              <h2 id="editor-title">编辑稿件</h2>
+            </div>
+            <span id="save-state" class="save-state">尚未保存</span>
+          </div>
+
+          <form id="survey-form" class="announcement-form">
+            <section id="locked-notice" class="notice-panel" hidden>
+              <strong>题目已锁定</strong>
+              <p>已经收到答卷。为保持统计口径一致，现在只能开始或停止征集。</p>
+            </section>
+
+            <fieldset>
+              <legend>投放范围</legend>
+              <div class="form-grid form-grid-three">
+                <label>
+                  <span>征集编号</span>
+                  <input id="record-id" type="number" min="1" inputmode="numeric" required data-definition />
+                  <small>不同语言版本使用相同编号</small>
+                </label>
+                <label>
+                  <span>目标平台</span>
+                  <select id="record-platform" data-definition>
+                    <option value="">iOS 与 watchOS</option>
+                    <option value="iOS">仅 iOS</option>
+                    <option value="watchOS">仅 watchOS</option>
+                  </select>
+                </label>
+                <label>
+                  <span>发布状态</span>
+                  <span class="switch-row">
+                    <input id="record-enabled" type="checkbox" />
+                    <span>开始征集</span>
+                  </span>
+                  <small>关闭后客户端不会再显示</small>
+                </label>
+              </div>
+
+              <div class="form-grid form-grid-three">
+                <label>
+                  <span>目标语言</span>
+                  <input id="record-language" type="text" list="survey-language-options" placeholder="留空表示全部语言" data-definition />
+                  <datalist id="survey-language-options">
+                    <option value="zh-Hans"></option>
+                    <option value="zh-Hant"></option>
+                    <option value="en"></option>
+                    <option value="ja"></option>
+                    <option value="fr"></option>
+                    <option value="es"></option>
+                    <option value="ru"></option>
+                    <option value="ar"></option>
+                  </datalist>
+                </label>
+                <label>
+                  <span>最低构建号</span>
+                  <input id="record-min-build" type="number" min="0" placeholder="不限制" data-definition />
+                </label>
+                <label>
+                  <span>最高构建号</span>
+                  <input id="record-max-build" type="number" min="0" placeholder="不限制" data-definition />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>开屏内容</legend>
+              <label>
+                <span>标题</span>
+                <input id="record-title" type="text" maxlength="200" required data-definition />
+              </label>
+              <label>
+                <span>说明</span>
+                <textarea id="record-description" rows="4" maxlength="2000" data-definition></textarea>
+                <small>可简要说明背景；客户端会另行显示“匿名提交”</small>
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <div class="fieldset-heading">
+                <span class="fieldset-legend">问题</span>
+                <button id="add-question-button" class="button button-secondary" type="button">添加问题</button>
+              </div>
+              <div id="question-list" class="question-list"></div>
+            </fieldset>
+
+            <section id="results-section" class="results-section" hidden>
+              <div class="results-heading">
+                <div>
+                  <p class="eyebrow">私有结果</p>
+                  <h3>答卷统计</h3>
+                </div>
+                <strong id="response-count">0 份</strong>
+              </div>
+              <div id="results-list" class="results-list"></div>
+            </section>
+
+            <div class="form-actions">
+              <div class="secondary-actions">
+                <button id="duplicate-button" class="button button-secondary" type="button" disabled>复制为语言版本</button>
+                <button id="delete-button" class="button button-danger" type="button" disabled>删除</button>
+              </div>
+              <button class="button button-primary button-save" type="submit">保存更改</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <template id="question-template">
+      <article class="question-card">
+        <div class="question-card-heading">
+          <span class="question-number"></span>
+          <button class="icon-button remove-question" type="button" aria-label="删除问题">×</button>
+        </div>
+        <label>
+          <span>问题</span>
+          <input class="question-title" type="text" maxlength="500" required data-definition />
+        </label>
+        <div class="form-grid form-grid-three">
+          <label>
+            <span>回答方式</span>
+            <select class="question-type" data-definition>
+              <option value="single_select">单选</option>
+              <option value="multi_select">多选</option>
+            </select>
+          </label>
+          <label>
+            <span>是否必填</span>
+            <span class="switch-row">
+              <input class="question-required" type="checkbox" data-definition />
+              <span>必填</span>
+            </span>
+          </label>
+          <label>
+            <span>自定义回答</span>
+            <span class="switch-row">
+              <input class="question-other" type="checkbox" data-definition />
+              <span>允许填写其他内容</span>
+            </span>
+          </label>
+        </div>
+        <div class="option-list"></div>
+        <button class="button button-secondary add-option" type="button">添加选项</button>
+      </article>
+    </template>
+
+    <template id="option-template">
+      <div class="option-row">
+        <span class="option-index"></span>
+        <input class="option-label" type="text" maxlength="200" placeholder="选项内容" required data-definition />
+        <button class="icon-button remove-option" type="button" aria-label="删除选项">×</button>
+      </div>
+    </template>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

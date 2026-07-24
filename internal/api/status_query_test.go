@@ -100,6 +100,7 @@ func TestHandleGetIssueStatusDoesNotUseRateLimitAndCachesOneHour(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	requestOne := httptest.NewRequest(http.MethodGet, "/v1/feedback/issues/42?ticket_token=token-42", nil)

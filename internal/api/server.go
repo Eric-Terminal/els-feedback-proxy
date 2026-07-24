@@ -38,6 +38,7 @@ type Server struct {
 	tickets       *store.TicketStore
 	announcements *store.AnnouncementStore
 	distribution  *store.DistributionStore
+	surveys       *store.SurveyStore
 	reviewer      moderation.Reviewer
 	archives      *store.BlockedArchiveStore
 	developers    map[string]struct{}
@@ -76,6 +77,7 @@ func NewServer(
 	archives *store.BlockedArchiveStore,
 	announcements *store.AnnouncementStore,
 	distribution *store.DistributionStore,
+	surveys *store.SurveyStore,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -107,6 +109,7 @@ func NewServer(
 		tickets:       tickets,
 		announcements: announcements,
 		distribution:  distribution,
+		surveys:       surveys,
 		reviewer:      reviewer,
 		archives:      archives,
 		developers:    buildDeveloperLoginSet(cfg),
@@ -149,11 +152,13 @@ func (s *Server) registerRoutes() {
 			"github_webhook_enabled":     s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "",
 			"admin_enabled":              s.adminInterfaceEnabled(),
 			"announcement_admin_enabled": s.adminInterfaceEnabled(),
+			"survey_admin_enabled":       s.surveys != nil && s.adminInterfaceEnabled(),
 		})
 	})
 
 	s.registerAnnouncementRoutes()
 	s.registerDistributionRoutes()
+	s.registerSurveyRoutes()
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
@@ -171,6 +176,9 @@ func (s *Server) registerAdminRoutes() {
 		}
 		if s.distribution != nil {
 			s.registerDistributionAdminRoutes()
+		}
+		if s.surveys != nil {
+			s.registerSurveyAdminRoutes()
 		}
 	}
 	if s.selfUpdater != nil {
