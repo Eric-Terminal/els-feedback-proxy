@@ -79,10 +79,11 @@ type SurveyAnswer struct {
 
 // SurveyResponseInput 是客户端提交的匿名答卷。
 type SurveyResponseInput struct {
-	Answers  []SurveyAnswer `json:"answers"`
-	Platform string         `json:"platform,omitempty"`
-	AppBuild string         `json:"app_build,omitempty"`
-	Language string         `json:"language,omitempty"`
+	Answers    []SurveyAnswer `json:"answers"`
+	Platform   string         `json:"platform,omitempty"`
+	AppVersion string         `json:"app_version,omitempty"`
+	AppBuild   string         `json:"app_build,omitempty"`
+	Language   string         `json:"language,omitempty"`
 }
 
 // SurveyResponseRecord 保存匿名答卷，不记录 IP 或设备标识。
@@ -91,6 +92,7 @@ type SurveyResponseRecord struct {
 	SurveyKey   string         `json:"survey_key"`
 	Answers     []SurveyAnswer `json:"answers"`
 	Platform    string         `json:"platform,omitempty"`
+	AppVersion  string         `json:"app_version,omitempty"`
 	AppBuild    string         `json:"app_build,omitempty"`
 	Language    string         `json:"language,omitempty"`
 	SubmittedAt time.Time      `json:"submitted_at"`
@@ -280,6 +282,7 @@ func (s *SurveyStore) Submit(key string, input SurveyResponseInput) (SurveyRespo
 		SurveyKey:   key,
 		Answers:     cloneSurveyAnswers(input.Answers),
 		Platform:    input.Platform,
+		AppVersion:  input.AppVersion,
 		AppBuild:    input.AppBuild,
 		Language:    input.Language,
 		SubmittedAt: time.Now().UTC(),
@@ -491,6 +494,7 @@ func normalizeSurveyRecord(record *SurveyRecord) {
 
 func normalizeSurveyResponseInput(input *SurveyResponseInput) {
 	input.Platform = normalizeAnnouncementPlatform(input.Platform)
+	input.AppVersion = strings.TrimSpace(input.AppVersion)
 	input.AppBuild = strings.TrimSpace(input.AppBuild)
 	input.Language = strings.TrimSpace(input.Language)
 	for index := range input.Answers {
@@ -518,14 +522,16 @@ func normalizeSurveyResponseRecord(record *SurveyResponseRecord) {
 	record.Key = strings.TrimSpace(record.Key)
 	record.SurveyKey = strings.TrimSpace(record.SurveyKey)
 	input := SurveyResponseInput{
-		Answers:  record.Answers,
-		Platform: record.Platform,
-		AppBuild: record.AppBuild,
-		Language: record.Language,
+		Answers:    record.Answers,
+		Platform:   record.Platform,
+		AppVersion: record.AppVersion,
+		AppBuild:   record.AppBuild,
+		Language:   record.Language,
 	}
 	normalizeSurveyResponseInput(&input)
 	record.Answers = input.Answers
 	record.Platform = input.Platform
+	record.AppVersion = input.AppVersion
 	record.AppBuild = input.AppBuild
 	record.Language = input.Language
 }
@@ -601,6 +607,9 @@ func validateSurveyResponse(survey SurveyRecord, input SurveyResponseInput) erro
 	}
 	if input.Platform != "" && input.Platform != "iOS" && input.Platform != "watchOS" {
 		return fmt.Errorf("平台仅支持 iOS 或 watchOS")
+	}
+	if len([]rune(input.AppVersion)) > 32 {
+		return fmt.Errorf("应用版本不能超过 32 个字符")
 	}
 	if len([]rune(input.AppBuild)) > 32 {
 		return fmt.Errorf("构建号不能超过 32 个字符")

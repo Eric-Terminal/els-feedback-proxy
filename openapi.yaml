@@ -736,10 +736,15 @@ components:
         platform:
           type: string
           enum: [iOS, watchOS]
+        app_version:
+          type: string
+          maxLength: 32
         app_build:
           type: string
+          maxLength: 32
         language:
           type: string
+          maxLength: 32
     PublicDistributionManifest:
       type: object
       required: [version, downloads]

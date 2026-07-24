@@ -70,7 +70,7 @@ func TestSurveyPublicSubmissionAndPrivateResults(t *testing.T) {
 		t.Fatal("公开意见征集接口缺少 CDN 缓存头或 ETag")
 	}
 
-	body := []byte(`{"answers":[{"question_id":"design","selected_option_ids":["compact"],"other_text":"文字更清楚"}],"platform":"iOS","app_build":"120","language":"zh-Hans"}`)
+	body := []byte(`{"answers":[{"question_id":"design","selected_option_ids":["compact"],"other_text":"文字更清楚"}],"platform":"iOS","app_version":"1.8.0","app_build":"120","language":"zh-Hans"}`)
 	path := "/v1/surveys/" + createdPayload.Record.Key + "/responses"
 	bundle := server.challenges.Issue("192.0.2.1", 0)
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
@@ -98,6 +98,8 @@ func TestSurveyPublicSubmissionAndPrivateResults(t *testing.T) {
 	if resultsResponse.Code != http.StatusOK ||
 		!strings.Contains(resultsResponse.Body.String(), `"response_count":1`) ||
 		!strings.Contains(resultsResponse.Body.String(), `"other_text":"文字更清楚"`) ||
+		!strings.Contains(resultsResponse.Body.String(), `"app_version":"1.8.0"`) ||
+		!strings.Contains(resultsResponse.Body.String(), `"app_build":"120"`) ||
 		strings.Contains(strings.ToLower(resultsResponse.Body.String()), `"ip"`) {
 		t.Fatalf("私有统计响应不正确: code=%d body=%s", resultsResponse.Code, resultsResponse.Body.String())
 	}

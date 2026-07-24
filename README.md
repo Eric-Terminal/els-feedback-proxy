@@ -20,7 +20,7 @@
 - `POST /v1/admin/self-update`：仅内网可用的自更新接口，下载指定 tag 的 Release 产物并替换当前二进制
 - `GET /v1/admin/self-update/status`：仅内网可用的自动更新器状态接口
 
-公告、意见征集、官方数据与反馈统一由 `https://feedback.els.ericterminal.com` 提供。意见征集定义保存在 `DATA_DIR/surveys.json`，匿名答卷保存在 `DATA_DIR/survey-responses.json`，不记录 IP 或设备标识，也不会同步到 GitHub。客户端只能读取已发布内容，草稿、答卷和管理字段不会进入公开响应。
+公告、意见征集、官方数据与反馈统一由 `https://feedback.els.ericterminal.com` 提供。意见征集定义保存在 `DATA_DIR/surveys.json`，匿名答卷保存在 `DATA_DIR/survey-responses.json`，仅包含答案、平台、应用版本、构建号、语言和提交时间，不记录 IP、设备标识或账号，也不会同步到 GitHub。客户端只能读取已发布内容，草稿、答卷和管理字段不会进入公开响应。
 
 ## 安全策略（方案B）
 - UA 校验：必须包含 `ETOS LLM Studio`（兼容 `%20` 编码）

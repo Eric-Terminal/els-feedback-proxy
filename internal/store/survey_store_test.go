@@ -22,9 +22,10 @@ func TestSurveyStorePersistsAnonymousResponsesAndFreezesDefinition(t *testing.T)
 			SelectedOptionIDs: []string{"compact"},
 			OtherText:         "希望列表更紧凑",
 		}},
-		Platform: "iOS",
-		AppBuild: "120",
-		Language: "zh-Hans",
+		Platform:   "iOS",
+		AppVersion: "1.8.0",
+		AppBuild:   "120",
+		Language:   "zh-Hans",
 	})
 	if err != nil {
 		t.Fatalf("保存匿名答卷失败: %v", err)
@@ -41,7 +42,10 @@ func TestSurveyStorePersistsAnonymousResponsesAndFreezesDefinition(t *testing.T)
 	if err != nil {
 		t.Fatalf("读取意见征集结果失败: %v", err)
 	}
-	if len(responses) != 1 || responses[0].Answers[0].OtherText != "希望列表更紧凑" {
+	if len(responses) != 1 ||
+		responses[0].Answers[0].OtherText != "希望列表更紧凑" ||
+		responses[0].AppVersion != "1.8.0" ||
+		responses[0].AppBuild != "120" {
 		t.Fatalf("匿名答卷未正确持久化: %+v", responses)
 	}
 

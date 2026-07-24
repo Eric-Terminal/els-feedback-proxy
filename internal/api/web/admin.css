@@ -871,6 +871,61 @@ textarea {
   gap: 12px;
 }
 
+.environment-summary {
+  margin-bottom: 12px;
+}
+
+.environment-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-solid);
+}
+
+.environment-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.environment-heading strong {
+  font-size: 0.82rem;
+}
+
+.environment-heading span,
+.environment-label {
+  color: var(--secondary);
+  font-size: 0.68rem;
+}
+
+.environment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.environment-values {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.environment-values > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+}
+
+.environment-values strong {
+  color: var(--secondary);
+  font-size: 0.68rem;
+}
+
 .results-empty {
   margin: 0;
   padding: 20px;
@@ -969,6 +1024,12 @@ textarea {
 .custom-answers span {
   color: var(--secondary);
   font-size: 0.66rem;
+}
+
+@media (max-width: 760px) {
+  .environment-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 input:focus,

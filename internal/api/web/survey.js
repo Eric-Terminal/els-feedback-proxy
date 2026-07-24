@@ -37,6 +37,7 @@ const elements = {
   description: document.querySelector("#record-description"),
   resultsSection: document.querySelector("#results-section"),
   responseCount: document.querySelector("#response-count"),
+  environmentSummary: document.querySelector("#environment-summary"),
   resultsList: document.querySelector("#results-list"),
   toast: document.querySelector("#toast"),
 };
@@ -382,6 +383,7 @@ async function loadResults(key) {
 
 function renderResults(survey, responses) {
   elements.resultsList.replaceChildren();
+  renderEnvironmentSummary(responses);
   if (responses.length === 0) {
     const empty = document.createElement("p");
     empty.className = "results-empty";
@@ -455,7 +457,12 @@ function renderResults(survey, responses) {
         const text = document.createElement("p");
         text.textContent = answer.other_text;
         const time = document.createElement("span");
-        time.textContent = formatSubmittedAt(response.submitted_at);
+        time.textContent = [
+          formatClientVersion(response),
+          platformLabel(response.platform),
+          response.language || "未知语言",
+          formatSubmittedAt(response.submitted_at),
+        ].filter(Boolean).join(" · ");
         item.append(text, time);
         customSection.append(item);
       }
@@ -463,6 +470,81 @@ function renderResults(survey, responses) {
     }
     elements.resultsList.append(card);
   }
+}
+
+function renderEnvironmentSummary(responses) {
+  elements.environmentSummary.replaceChildren();
+  elements.environmentSummary.hidden = responses.length === 0;
+  if (responses.length === 0) {
+    return;
+  }
+
+  const card = document.createElement("article");
+  card.className = "environment-card";
+  const heading = document.createElement("div");
+  heading.className = "environment-heading";
+  const title = document.createElement("strong");
+  title.textContent = "客户端分布";
+  const description = document.createElement("span");
+  description.textContent = "匿名版本与运行环境";
+  heading.append(title, description);
+  card.append(heading);
+
+  const groups = [
+    ["版本与构建", countValues(responses, formatClientVersion)],
+    ["平台", countValues(responses, (response) => platformLabel(response.platform))],
+    ["语言", countValues(responses, (response) => response.language || "未知语言")],
+  ];
+
+  const grid = document.createElement("div");
+  grid.className = "environment-grid";
+  for (const [label, values] of groups) {
+    const group = document.createElement("section");
+    const groupLabel = document.createElement("span");
+    groupLabel.className = "environment-label";
+    groupLabel.textContent = label;
+    const list = document.createElement("div");
+    list.className = "environment-values";
+    for (const [value, count] of values) {
+      const item = document.createElement("span");
+      const name = document.createElement("span");
+      name.textContent = value;
+      const amount = document.createElement("strong");
+      amount.textContent = String(count);
+      item.append(name, amount);
+      list.append(item);
+    }
+    group.append(groupLabel, list);
+    grid.append(group);
+  }
+  card.append(grid);
+  elements.environmentSummary.append(card);
+}
+
+function countValues(responses, selector) {
+  const counts = new Map();
+  for (const response of responses) {
+    const value = selector(response);
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) =>
+    right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"),
+  );
+}
+
+function formatClientVersion(response) {
+  const version = response.app_version || "";
+  const build = response.app_build || "";
+  if (version && build) {
+    return `${version} (${build})`;
+  }
+  if (version) {
+    return version;
+  }
+  if (build) {
+    return `构建 ${build}`;
+  }
+  return "未知版本";
 }
 
 function setDefinitionLocked(locked) {
