@@ -28,22 +28,24 @@ import (
 
 // Server HTTP 服务封装
 type Server struct {
-	cfg           config.Config
-	gh            githubGateway
-	limiter       rateLimiter
-	dedupe        duplicateDetector
-	statusCache   *issueStatusCache
-	selfUpdater   selfUpdateController
-	challenges    *security.ChallengeManager
-	tickets       *store.TicketStore
-	announcements *store.AnnouncementStore
-	distribution  *store.DistributionStore
-	surveys       *store.SurveyStore
-	reviewer      moderation.Reviewer
-	archives      *store.BlockedArchiveStore
-	developers    map[string]struct{}
-	engine        *gin.Engine
-	adminEngine   *gin.Engine
+	cfg                 config.Config
+	gh                  githubGateway
+	updateTimeline      updateTimelineGateway
+	limiter             rateLimiter
+	dedupe              duplicateDetector
+	statusCache         *issueStatusCache
+	updateTimelineCache updateTimelineCache
+	selfUpdater         selfUpdateController
+	challenges          *security.ChallengeManager
+	tickets             *store.TicketStore
+	announcements       *store.AnnouncementStore
+	distribution        *store.DistributionStore
+	surveys             *store.SurveyStore
+	reviewer            moderation.Reviewer
+	archives            *store.BlockedArchiveStore
+	developers          map[string]struct{}
+	engine              *gin.Engine
+	adminEngine         *gin.Engine
 }
 
 type selfUpdateController interface {
@@ -99,22 +101,23 @@ func NewServer(
 	adminEngine.ForwardedByClientIP = false
 
 	server := &Server{
-		cfg:           cfg,
-		gh:            gh,
-		limiter:       limiter,
-		dedupe:        dedupe,
-		statusCache:   newIssueStatusCache(time.Hour),
-		selfUpdater:   newSelfUpdateManager(cfg),
-		challenges:    challenges,
-		tickets:       tickets,
-		announcements: announcements,
-		distribution:  distribution,
-		surveys:       surveys,
-		reviewer:      reviewer,
-		archives:      archives,
-		developers:    buildDeveloperLoginSet(cfg),
-		engine:        publicEngine,
-		adminEngine:   adminEngine,
+		cfg:            cfg,
+		gh:             gh,
+		updateTimeline: updateTimelineGatewayFrom(gh),
+		limiter:        limiter,
+		dedupe:         dedupe,
+		statusCache:    newIssueStatusCache(time.Hour),
+		selfUpdater:    newSelfUpdateManager(cfg),
+		challenges:     challenges,
+		tickets:        tickets,
+		announcements:  announcements,
+		distribution:   distribution,
+		surveys:        surveys,
+		reviewer:       reviewer,
+		archives:       archives,
+		developers:     buildDeveloperLoginSet(cfg),
+		engine:         publicEngine,
+		adminEngine:    adminEngine,
 	}
 
 	server.engine.Use(gin.Recovery())
@@ -159,6 +162,7 @@ func (s *Server) registerRoutes() {
 	s.registerAnnouncementRoutes()
 	s.registerDistributionRoutes()
 	s.registerSurveyRoutes()
+	s.registerUpdateTimelineRoutes()
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
@@ -166,6 +170,11 @@ func (s *Server) registerRoutes() {
 	if s.selfUpdater != nil && strings.TrimSpace(s.cfg.GitHubWebhookSecret) != "" {
 		s.engine.POST("/v1/github/webhooks", s.handleGitHubWebhook)
 	}
+}
+
+func updateTimelineGatewayFrom(gh githubGateway) updateTimelineGateway {
+	gateway, _ := gh.(updateTimelineGateway)
+	return gateway
 }
 
 func (s *Server) registerAdminRoutes() {

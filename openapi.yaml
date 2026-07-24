@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ELS Feedback & Notification API
-  version: 3.1.0
+  version: 3.2.0
 servers:
   - url: https://feedback.els.ericterminal.com
 paths:
@@ -32,6 +32,28 @@ paths:
                   $ref: '#/components/schemas/PublicAnnouncement'
         '304':
           description: 公告内容未变化
+  /v1/updates/timeline:
+    get:
+      summary: 获取 ETOS 检查更新时间线
+      description: 服务端使用 GitHub 凭据读取固定仓库 dev 分支，并向客户端提供共享缓存后的结构化提交数据。
+      responses:
+        '200':
+          description: 提交时间线
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cloudflare-CDN-Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateTimeline'
+        '304':
+          description: 时间线内容未变化
+        '502':
+          description: GitHub 暂时不可用且服务端没有旧缓存
   /v1/admin/announcements:
     get:
       summary: 获取全部公告管理记录
@@ -618,6 +640,40 @@ components:
       scheme: bearer
       description: 使用 ANNOUNCEMENT_ADMIN_TOKEN；浏览器管理台使用安全会话 Cookie
   schemas:
+    UpdateTimeline:
+      type: object
+      required: [version, branch, commits]
+      properties:
+        version:
+          type: integer
+          enum: [1]
+        branch:
+          type: string
+          enum: [dev]
+        commits:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateTimelineCommit'
+    UpdateTimelineCommit:
+      type: object
+      required: [oid, message_headline, message, committed_at, url, ci_contexts]
+      properties:
+        oid:
+          type: string
+        message_headline:
+          type: string
+        message:
+          type: string
+        committed_at:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+        ci_contexts:
+          type: array
+          items:
+            type: string
     PublicAnnouncement:
       type: object
       required: [id, type, title, body]

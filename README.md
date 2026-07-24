@@ -1,6 +1,6 @@
 # ELS Feedback & Notification Service
 
-面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单、客户端公告、意见征集与官方数据下发，后续遥测等服务可继续按 `/v1/<module>` 拆分接入同一域名。
+面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单、客户端公告、意见征集、检查更新时间线与官方数据下发，后续遥测等服务可继续按 `/v1/<module>` 拆分接入同一域名。
 
 ## 功能概览
 - `GET /v1/announcements`：返回已发布的客户端公告，支持 ETag 与 Cloudflare 边缘缓存
@@ -8,6 +8,7 @@
 - `POST /v1/surveys/:key/responses`：通过一次性 challenge、HMAC 与 PoW 保存匿名答卷
 - `GET /v1/distribution/manifest`：返回客户端官方数据清单，支持 ETag 与 Cloudflare 边缘缓存
 - `GET /v1/distribution/files/<sha256>/<文件名>`：下载内容寻址的不可变官方文件
+- `GET /v1/updates/timeline`：使用服务端 GitHub 凭据读取 `dev` 分支提交与 CI 状态，并通过内存、ETag 和 Cloudflare 共享缓存
 - `GET http://<内网地址>/`：仅由管理监听器提供的管理中心首页
 - `GET http://<内网地址>/admin/announcements`：仅由管理监听器提供的公告编辑 WebUI
 - `GET http://<内网地址>/admin/surveys`：仅由管理监听器提供的意见征集与私有统计 WebUI
@@ -20,7 +21,7 @@
 - `POST /v1/admin/self-update`：仅内网可用的自更新接口，下载指定 tag 的 Release 产物并替换当前二进制
 - `GET /v1/admin/self-update/status`：仅内网可用的自动更新器状态接口
 
-公告、意见征集、官方数据与反馈统一由 `https://feedback.els.ericterminal.com` 提供。意见征集定义保存在 `DATA_DIR/surveys.json`，匿名答卷保存在 `DATA_DIR/survey-responses.json`，仅包含答案、平台、应用版本、构建号、语言和提交时间，不记录 IP、设备标识或账号，也不会同步到 GitHub。客户端只能读取已发布内容，草稿、答卷和管理字段不会进入公开响应。
+公告、意见征集、检查更新时间线、官方数据与反馈统一由 `https://feedback.els.ericterminal.com` 提供。检查更新接口只代理固定仓库的结构化提交数据，不接受任意 GitHub 地址；服务端复用 `GITHUB_TOKEN`，客户端不会接触 GitHub 凭据。意见征集定义保存在 `DATA_DIR/surveys.json`，匿名答卷保存在 `DATA_DIR/survey-responses.json`，仅包含答案、平台、应用版本、构建号、语言和提交时间，不记录 IP、设备标识或账号，也不会同步到 GitHub。客户端只能读取已发布内容，草稿、答卷和管理字段不会进入公开响应。
 
 ## 安全策略（方案B）
 - UA 校验：必须包含 `ETOS LLM Studio`（兼容 `%20` 编码）
