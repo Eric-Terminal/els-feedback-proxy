@@ -176,6 +176,7 @@ func newSurveyTestServer(t *testing.T, adminToken string) *Server {
 		nil,
 		nil,
 		surveys,
+		nil,
 	)
 }
 

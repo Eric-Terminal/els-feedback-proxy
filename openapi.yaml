@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: ELS Feedback & Notification API
-  version: 3.2.0
+  version: 4.0.0
 servers:
   - url: https://feedback.els.ericterminal.com
 paths:
@@ -460,6 +460,156 @@ paths:
           description: 官方数据已删除
         '404':
           description: 官方数据不存在
+  /v1/telemetry:
+    post:
+      summary: 上传上一运行周期的 iOS 性能遥测
+      description: >-
+        接收 MetricKit 原始指标或诊断封装。该接口不使用 PoW、App Attest 或设备标识；
+        来源 IP 仅用于进程内限流，不写入遥测文件或持久化状态。
+      parameters:
+        - in: header
+          name: User-Agent
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Content-Encoding
+          required: false
+          description: 仅允许省略或 identity；压缩请求会被拒绝。
+          schema:
+            type: string
+            enum: [identity]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryUploadRequest'
+      responses:
+        '200':
+          description: 每条遥测均已持久化或命中持久去重
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryUploadResponse'
+        '400':
+          description: schema、哈希、时间、元数据或隐私声明无效
+        '413':
+          description: 请求体超过 4 MiB
+        '415':
+          description: Content-Type 无效或使用了压缩请求体
+        '429':
+          description: 触发独立的进程内遥测限流
+        '507':
+          description: 服务端无法在保留诊断优先级的前提下保存该条遥测
+  /v1/admin/telemetry/status:
+    get:
+      summary: 获取遥测临时存储状态
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 条数、字节数、分类统计与保留上限
+        '401':
+          description: 管理鉴权失败
+  /v1/admin/telemetry/manifest:
+    get:
+      summary: 获取待拉取遥测清单
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 包含文件大小、文件 SHA-256 与 UTC 日期路径的清单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryManifest'
+        '401':
+          description: 管理鉴权失败
+  /v1/admin/telemetry/files/{payload_id}:
+    parameters:
+      - in: path
+        name: payload_id
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    get:
+      summary: 按 payload_id 导出单个原始遥测文件
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: 原始 TelemetryEnvelope JSON
+          headers:
+            X-ELS-File-SHA256:
+              schema:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+        '401':
+          description: 管理鉴权失败
+        '404':
+          description: 文件不存在或已确认删除
+  /v1/admin/telemetry/confirm:
+    post:
+      summary: 精确确认 Mac 已安全落盘的遥测
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8521'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload_ids]
+              properties:
+                payload_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 512
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: 已确认删除与未知 ID 列表；重复确认保持幂等
+        '400':
+          description: 请求体或 payload_id 无效
+        '401':
+          description: 管理鉴权失败
   /v1/feedback/challenge:
     post:
       summary: 获取 challenge
@@ -640,6 +790,169 @@ components:
       scheme: bearer
       description: 使用 ANNOUNCEMENT_ADMIN_TOKEN；浏览器管理台使用安全会话 Cookie
   schemas:
+    TelemetryUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [schema_version, envelopes]
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        envelopes:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/TelemetryEnvelope'
+    TelemetryUploadResponse:
+      type: object
+      required: [schema_version, results]
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        results:
+          type: array
+          items:
+            type: object
+            required: [payload_id, status]
+            properties:
+              payload_id:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+              status:
+                type: string
+                enum: [accepted, duplicate]
+    TelemetryEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - payload_id
+        - kind
+        - captured_at
+        - app
+        - platform
+        - privacy
+        - payload
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        payload_id:
+          type: string
+          description: 规范化原始 payload JSON 的 SHA-256。
+          pattern: '^[a-f0-9]{64}$'
+        kind:
+          type: string
+          enum: [metric, diagnostic]
+        captured_at:
+          type: string
+          format: date-time
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        app:
+          type: object
+          additionalProperties: false
+          required: [version, build, distribution]
+          properties:
+            version:
+              type: string
+            build:
+              type: string
+            distribution:
+              type: string
+              enum: [testflight, appstore, development, unknown]
+        platform:
+          type: object
+          additionalProperties: false
+          required: [name, os_version, device_class, architecture]
+          properties:
+            name:
+              type: string
+              enum: [ios]
+            os_version:
+              type: string
+            device_class:
+              type: string
+            architecture:
+              type: string
+        privacy:
+          type: object
+          additionalProperties: false
+          required:
+            - contains_chat_content
+            - contains_request_body
+            - contains_response_body
+            - contains_credentials
+            - contains_user_identifier
+          properties:
+            contains_chat_content:
+              type: boolean
+              enum: [false]
+            contains_request_body:
+              type: boolean
+              enum: [false]
+            contains_response_body:
+              type: boolean
+              enum: [false]
+            contains_credentials:
+              type: boolean
+              enum: [false]
+            contains_user_identifier:
+              type: boolean
+              enum: [false]
+        payload:
+          type: object
+          description: Apple MetricKit 产生的原始 JSON 对象，未知字段原样保留。
+          additionalProperties: true
+    TelemetryManifest:
+      type: object
+      required: [schema_version, generated_at, entries]
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        generated_at:
+          type: string
+          format: date-time
+        entries:
+          type: array
+          items:
+            type: object
+            required:
+              - payload_id
+              - kind
+              - captured_at
+              - received_at
+              - relative_path
+              - size_bytes
+              - file_sha256
+            properties:
+              payload_id:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+              kind:
+                type: string
+                enum: [metric, diagnostic]
+              captured_at:
+                type: string
+                format: date-time
+              received_at:
+                type: string
+                format: date-time
+              relative_path:
+                type: string
+              size_bytes:
+                type: integer
+                format: int64
+              file_sha256:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
     UpdateTimeline:
       type: object
       required: [version, branch, commits]

@@ -17,7 +17,8 @@ import (
 const (
 	defaultAdminURL    = "http://127.0.0.1:8521"
 	maxCLIRequestBody  = 64 << 10
-	maxCLIResponseBody = 1 << 20
+	maxCLIResponseBody = 32 << 20
+	maxCLIRawBody      = 4 << 20
 )
 
 type adminClient struct {
@@ -39,6 +40,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) (bool, error)
 		return true, runDistribution(args[1:], stdout, stderr)
 	case "survey", "surveys":
 		return true, runSurvey(args[1:], stdin, stdout, stderr)
+	case "telemetry":
+		return true, runTelemetry(args[1:], stdin, stdout, stderr)
 	case "help", "--help", "-h":
 		writeRootHelp(stdout)
 		return true, nil
@@ -269,6 +272,39 @@ func (client *adminClient) perform(request *http.Request, stdout io.Writer) erro
 	return writeJSON(stdout, payload)
 }
 
+func (client *adminClient) requestRaw(path string, stdout io.Writer) error {
+	request, err := http.NewRequest(http.MethodGet, client.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("创建管理请求失败: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+client.token)
+	request.Header.Set("Accept", "application/json")
+	response, err := client.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("连接管理 API 失败: %w", err)
+	}
+	defer response.Body.Close()
+
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxCLIRawBody+1))
+	if err != nil {
+		return fmt.Errorf("读取管理 API 响应失败: %w", err)
+	}
+	if len(responseBody) > maxCLIRawBody {
+		return errors.New("遥测文件超过大小限制")
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		message := strings.TrimSpace(string(responseBody))
+		if message == "" {
+			message = response.Status
+		}
+		return fmt.Errorf("管理 API 返回 %d: %s", response.StatusCode, message)
+	}
+	if _, err := stdout.Write(responseBody); err != nil {
+		return fmt.Errorf("写出遥测文件失败: %w", err)
+	}
+	return nil
+}
+
 func readRequestBody(path string, stdin io.Reader) ([]byte, error) {
 	var reader io.Reader
 	if path == "-" {
@@ -313,6 +349,7 @@ func writeRootHelp(writer io.Writer) {
   els-feedback-proxy announcement <命令>    通过管理 API 操作公告
   els-feedback-proxy survey <命令>          通过管理 API 操作意见征集
   els-feedback-proxy distribution <命令>    通过管理 API 操作官方数据
+  els-feedback-proxy telemetry <命令>       导出并确认性能遥测
 
 使用对应命令的 --help 查看详细用法。`)
 }

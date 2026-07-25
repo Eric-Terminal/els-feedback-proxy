@@ -285,6 +285,7 @@ func newAnnouncementTestServer(t *testing.T, adminToken string) *Server {
 		announcementStore,
 		nil,
 		nil,
+		nil,
 	)
 }
 

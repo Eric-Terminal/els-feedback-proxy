@@ -49,6 +49,9 @@ type Config struct {
 	QueryLimitPerWindow      int
 	CommentLimitPerWindow    int
 	AdminLoginLimitPerWindow int
+	TelemetryRateLimit       int
+	TelemetryRetentionDays   int
+	TelemetryMaxTotalBytes   int64
 	ModerationEnabled        bool
 	ModerationAPIBaseURL     string
 	ModerationAPIKey         string
@@ -98,6 +101,9 @@ func Load() (Config, error) {
 		QueryLimitPerWindow:      getEnvAsInt("QUERY_LIMIT_PER_WINDOW", 60),
 		CommentLimitPerWindow:    getEnvAsInt("COMMENT_LIMIT_PER_WINDOW", 20),
 		AdminLoginLimitPerWindow: getEnvAsInt("ADMIN_LOGIN_LIMIT_PER_WINDOW", 10),
+		TelemetryRateLimit:       clampInt(getEnvAsInt("TELEMETRY_RATE_LIMIT_PER_MINUTE", 30), 1, 600),
+		TelemetryRetentionDays:   clampInt(getEnvAsInt("TELEMETRY_RETENTION_DAYS", 30), 1, 365),
+		TelemetryMaxTotalBytes:   clampInt64(getEnvAsInt64("TELEMETRY_MAX_TOTAL_BYTES", 2<<30), 1<<20, 1<<40),
 		ModerationEnabled:        getEnvAsBool("MODERATION_ENABLED", true),
 		ModerationAPIBaseURL:     strings.TrimSpace(os.Getenv("MODERATION_API_BASE_URL")),
 		ModerationAPIKey:         strings.TrimSpace(os.Getenv("MODERATION_API_KEY")),
@@ -172,6 +178,18 @@ func getEnvAsFloat(key string, fallback float64) float64 {
 	return parsed
 }
 
+func getEnvAsInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
 func getEnvAsBool(key string, fallback bool) bool {
 	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
 	if value == "" {
@@ -218,6 +236,16 @@ func clampInt(value, min, max int) int {
 }
 
 func clampFloat(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func clampInt64(value, min, max int64) int64 {
 	if value < min {
 		return min
 	}

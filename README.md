@@ -1,6 +1,6 @@
 # ELS Feedback & Notification Service
 
-面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单、客户端公告、意见征集、检查更新时间线与官方数据下发，后续遥测等服务可继续按 `/v1/<module>` 拆分接入同一域名。
+面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单、客户端公告、意见征集、检查更新时间线、官方数据下发与匿名性能遥测。
 
 ## 功能概览
 - `GET /v1/announcements`：返回已发布的客户端公告，支持 ETag 与 Cloudflare 边缘缓存
@@ -9,6 +9,11 @@
 - `GET /v1/distribution/manifest`：返回客户端官方数据清单，支持 ETag 与 Cloudflare 边缘缓存
 - `GET /v1/distribution/files/<sha256>/<文件名>`：下载内容寻址的不可变官方文件
 - `GET /v1/updates/timeline`：使用服务端 GitHub 凭据读取 `dev` 分支提交与 CI 状态，并通过内存、ETag 和 Cloudflare 共享缓存
+- `POST /v1/telemetry`：接收 iOS MetricKit 指标与诊断；不使用 PoW，不持久化来源 IP
+- `GET /v1/admin/telemetry/status`：仅由管理监听器提供的遥测临时存储统计
+- `GET /v1/admin/telemetry/manifest`：仅由管理监听器提供的待拉取文件清单
+- `GET /v1/admin/telemetry/files/<payload_id>`：仅由管理监听器导出单个原始遥测文件
+- `POST /v1/admin/telemetry/confirm`：仅在 Mac 完整校验落盘后精确确认并删除服务端文件
 - `GET http://<内网地址>/`：仅由管理监听器提供的管理中心首页
 - `GET http://<内网地址>/admin/announcements`：仅由管理监听器提供的公告编辑 WebUI
 - `GET http://<内网地址>/admin/surveys`：仅由管理监听器提供的意见征集与私有统计 WebUI
@@ -77,8 +82,24 @@
 - `ADMIN_WEB_AUTH_DISABLED`：是否让内网 WebUI 自动建立管理会话（默认 `false`）；启用时仍需配置管理口令作为会话签名密钥
 - `ANNOUNCEMENT_CACHE_MAX_AGE_SECONDS`：Cloudflare 边缘缓存秒数（默认 `300`，范围 `30~3600`）
 - `ADMIN_LOGIN_LIMIT_PER_WINDOW`：管理页面每 IP 登录尝试上限（默认 `10`，每 15 分钟）
+- `TELEMETRY_RATE_LIMIT_PER_MINUTE`：每个来源 IP 每分钟可提交的遥测批次数（默认 `30`，仅保存在进程内）
+- `TELEMETRY_RETENTION_DAYS`：服务端临时遥测保留天数（默认 `30`，范围 `1~365`）
+- `TELEMETRY_MAX_TOTAL_BYTES`：服务端临时遥测总字节上限（默认 `2147483648`）
 
 当配置 `REDIS_ADDR` 且可连通时，限流与去重会自动升级为 Redis 全局模式；连接失败会自动回退到内存模式。
+
+性能遥测是一个独立边界：它不使用反馈 challenge、PoW、Redis 限流或 App
+Attest。来源 IP 只进入进程内一分钟固定窗口限流键，既不写入遥测文件，也不写入
+磁盘去重状态。服务端严格校验 schema、原始 payload SHA-256、时间、应用与平台
+元数据，并要求聊天原文、API 请求体、API 响应体、凭据和用户标识五项隐私声明
+全部为 `false`。
+
+每次请求最多包含 16 条遥测且总请求体不超过 4 MiB，不接受压缩请求体。通过
+校验的原始 envelope 按接收日期写入
+`DATA_DIR/telemetry/records/YYYY-MM-DD/`，持久化去重键避免客户端重试产生副本。
+默认临时保留 30 天、总量上限 2 GiB；启动、每次写入及每六小时会执行清理。
+超出配额时先删除最旧普通指标，再删除最旧诊断；新普通指标不会为了腾出空间而
+淘汰已有诊断。
 
 ## 内网管理页面
 
@@ -148,6 +169,11 @@ CLI 通过独立管理监听器调用与 WebUI 相同的管理 API，不会直�
 ./els-feedback-proxy distribution upload --name <名称> --path /Documents/<目录> --file <本地文件>
 ./els-feedback-proxy distribution update --key <数据-key> --name <名称> --path /Documents/<目录> [--file <替换文件>]
 ./els-feedback-proxy distribution delete --key <数据-key>
+
+./els-feedback-proxy telemetry status
+./els-feedback-proxy telemetry manifest
+./els-feedback-proxy telemetry export --payload-id <SHA-256>
+printf '%s' '{"payload_ids":["<SHA-256>"]}' | ./els-feedback-proxy telemetry confirm --file -
 ```
 
 默认管理 API 地址为 `http://127.0.0.1:8521`。使用其他监听地址时，可以设置 `ELS_ADMIN_URL`，也可以为单次命令传入 `--admin-url`：
@@ -157,6 +183,10 @@ ELS_ADMIN_URL=http://192.168.31.102:8521 ./els-feedback-proxy announcement list
 ```
 
 公告与意见征集的 `create`、`update` 支持用 `--file -` 从标准输入读取 JSON。官方数据 `upload` 和 `update` 可加 `--disabled` 暂停公开下发。所有成功响应均输出格式化 JSON，方便人工查看或继续交给其他命令处理。完整用法可通过对应命令的 `--help` 查看。
+
+遥测 `export` 会逐字节输出原始 JSON，不做格式化。只有接收端已经核对清单中的
+`size_bytes`、`file_sha256` 且确认文件是有效 JSON 后，才可调用 `confirm`。
+确认接口按 `payload_id` 精确删除，并允许网络重试导致的重复确认。
 
 ## Cloudflare 缓存与防护
 
@@ -168,7 +198,7 @@ ELS_ADMIN_URL=http://192.168.31.102:8521 ./els-feedback-proxy announcement list
 - `/v1/surveys`：Eligible for cache，Edge TTL 遵循源站缓存控制
 - `/v1/distribution/manifest`：Eligible for cache，Edge TTL 遵循源站缓存控制
 - `/v1/distribution/files/*`：Eligible for cache，Edge TTL 遵循源站缓存控制
-- `/v1/surveys/*`、`/v1/feedback/*`、`/v1/github/webhooks`：Bypass cache；精确的 `/v1/surveys` 读取规则应排在通配规则之前
+- `/v1/surveys/*`、`/v1/feedback/*`、`/v1/telemetry`、`/v1/github/webhooks`：Bypass cache；精确的 `/v1/surveys` 读取规则应排在通配规则之前
 - 在 Cloudflare Rate Limiting Rules 中为 challenge、提交和评论入口设置边缘限流；源站仍保留 Redis 限流与 PoW 作为第二层保护
 
 Cloudflare Tunnel 隐藏了家庭网络源站地址。不要把公开端口或管理端口映射到家庭公网；管理端口只能通过局域网直连。

@@ -15,6 +15,7 @@ import (
 	"els-feedback-proxy/internal/moderation"
 	"els-feedback-proxy/internal/security"
 	"els-feedback-proxy/internal/store"
+	"els-feedback-proxy/internal/telemetry"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -108,6 +109,26 @@ func main() {
 		log.Fatalf("意见征集存储初始化失败: %v", err)
 	}
 
+	telemetryStore, err := telemetry.NewStore(cfg.DataDir, telemetry.StoreOptions{
+		Retention:    time.Duration(cfg.TelemetryRetentionDays) * 24 * time.Hour,
+		MaxTotalSize: cfg.TelemetryMaxTotalBytes,
+	})
+	if err != nil {
+		log.Fatalf("性能遥测存储初始化失败: %v", err)
+	}
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			removed, cleanupErr := telemetryStore.Cleanup()
+			if cleanupErr != nil {
+				log.Printf("性能遥测定时清理失败: %v", cleanupErr)
+			} else if removed > 0 {
+				log.Printf("性能遥测定时清理完成: 删除 %d 条", removed)
+			}
+		}
+	}()
+
 	var reviewer moderation.Reviewer = moderation.AllowAllReviewer{}
 	if cfg.ModerationEnabled {
 		reviewer = moderation.NewOpenAIReviewer(moderation.OpenAIReviewerConfig{
@@ -132,6 +153,7 @@ func main() {
 		announcementStore,
 		distributionStore,
 		surveyStore,
+		telemetryStore,
 	)
 
 	log.Printf(

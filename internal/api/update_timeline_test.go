@@ -158,5 +158,6 @@ func newUpdateTimelineTestServer(gateway *updateTimelineTestGitHub) *Server {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 }

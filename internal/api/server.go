@@ -24,6 +24,7 @@ import (
 	"els-feedback-proxy/internal/moderation"
 	"els-feedback-proxy/internal/security"
 	"els-feedback-proxy/internal/store"
+	telemetrysvc "els-feedback-proxy/internal/telemetry"
 )
 
 // Server HTTP 服务封装
@@ -43,6 +44,8 @@ type Server struct {
 	surveys             *store.SurveyStore
 	reviewer            moderation.Reviewer
 	archives            *store.BlockedArchiveStore
+	telemetry           *telemetrysvc.Store
+	telemetryLimiter    rateLimiter
 	developers          map[string]struct{}
 	engine              *gin.Engine
 	adminEngine         *gin.Engine
@@ -80,6 +83,7 @@ func NewServer(
 	announcements *store.AnnouncementStore,
 	distribution *store.DistributionStore,
 	surveys *store.SurveyStore,
+	telemetryStore *telemetrysvc.Store,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -101,23 +105,25 @@ func NewServer(
 	adminEngine.ForwardedByClientIP = false
 
 	server := &Server{
-		cfg:            cfg,
-		gh:             gh,
-		updateTimeline: updateTimelineGatewayFrom(gh),
-		limiter:        limiter,
-		dedupe:         dedupe,
-		statusCache:    newIssueStatusCache(time.Hour),
-		selfUpdater:    newSelfUpdateManager(cfg),
-		challenges:     challenges,
-		tickets:        tickets,
-		announcements:  announcements,
-		distribution:   distribution,
-		surveys:        surveys,
-		reviewer:       reviewer,
-		archives:       archives,
-		developers:     buildDeveloperLoginSet(cfg),
-		engine:         publicEngine,
-		adminEngine:    adminEngine,
+		cfg:              cfg,
+		gh:               gh,
+		updateTimeline:   updateTimelineGatewayFrom(gh),
+		limiter:          limiter,
+		dedupe:           dedupe,
+		statusCache:      newIssueStatusCache(time.Hour),
+		selfUpdater:      newSelfUpdateManager(cfg),
+		challenges:       challenges,
+		tickets:          tickets,
+		announcements:    announcements,
+		distribution:     distribution,
+		surveys:          surveys,
+		reviewer:         reviewer,
+		archives:         archives,
+		telemetry:        telemetryStore,
+		telemetryLimiter: security.NewFixedWindowLimiter(),
+		developers:       buildDeveloperLoginSet(cfg),
+		engine:           publicEngine,
+		adminEngine:      adminEngine,
 	}
 
 	server.engine.Use(gin.Recovery())
@@ -156,6 +162,7 @@ func (s *Server) registerRoutes() {
 			"admin_enabled":              s.adminInterfaceEnabled(),
 			"announcement_admin_enabled": s.adminInterfaceEnabled(),
 			"survey_admin_enabled":       s.surveys != nil && s.adminInterfaceEnabled(),
+			"telemetry_enabled":          s.telemetry != nil,
 		})
 	})
 
@@ -163,6 +170,9 @@ func (s *Server) registerRoutes() {
 	s.registerDistributionRoutes()
 	s.registerSurveyRoutes()
 	s.registerUpdateTimelineRoutes()
+	if s.telemetry != nil {
+		s.registerTelemetryRoutes()
+	}
 	s.engine.POST("/v1/feedback/challenge", s.handleChallenge)
 	s.engine.POST("/v1/feedback/issues", s.handleCreateIssue)
 	s.engine.GET("/v1/feedback/issues/:issueNumber", s.handleGetIssueStatus)
@@ -194,11 +204,14 @@ func (s *Server) registerAdminRoutes() {
 		s.adminEngine.POST("/v1/admin/self-update", s.handleSelfUpdate)
 		s.adminEngine.GET("/v1/admin/self-update/status", s.handleSelfUpdateStatus)
 	}
+	if s.telemetryAdminEnabled() {
+		s.registerTelemetryAdminRoutes()
+	}
 }
 
 func (s *Server) adminServerEnabled() bool {
 	return strings.TrimSpace(s.cfg.AdminListenAddr) != "" &&
-		(s.adminInterfaceEnabled() || s.selfUpdater != nil)
+		(s.adminInterfaceEnabled() || s.telemetryAdminEnabled() || s.selfUpdater != nil)
 }
 
 func (s *Server) handleChallenge(c *gin.Context) {
