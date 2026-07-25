@@ -46,11 +46,12 @@ func TestAnalyzerExtractsSignpostPercentilesAndSymbolicatesDiagnostics(t *testin
 			InputDir:  filepath.Dir(inputDir),
 			OutputDir: outputDir,
 		},
-		symbolicator: fakeFrameSymbolicator{},
-		histograms:   make(map[histogramKey]*histogramAccumulator),
-		measurements: make(map[measurementKey]*measurementAccumulator),
-		signposts:    make(map[signpostKey]*signpostAccumulator),
-		missing:      make(map[string]*missingSymbolRow),
+		symbolicator:  fakeFrameSymbolicator{},
+		histograms:    make(map[histogramKey]*histogramAccumulator),
+		measurements:  make(map[measurementKey]*measurementAccumulator),
+		signposts:     make(map[signpostKey]*signpostAccumulator),
+		unknownFields: make(map[unknownFieldKey]int),
+		missing:       make(map[string]*missingSymbolRow),
 	}
 	if err := instance.scan(); err != nil {
 		t.Fatalf("扫描合成遥测失败: %v", err)
@@ -87,7 +88,25 @@ func TestAnalyzerExtractsSignpostPercentilesAndSymbolicatesDiagnostics(t *testin
 		signpostRows[0].Distribution != "testflight" {
 		t.Fatalf("Signpost 次数或分析维度错误: %+v", signpostRows)
 	}
-	if err := instance.writeReports(rows, measurementRows, signpostRows); err != nil {
+	sampleGroupRows := instance.finalizeSampleGroups()
+	if len(sampleGroupRows) != 1 ||
+		sampleGroupRows[0].Date != "2026-07-26" ||
+		sampleGroupRows[0].DiagnosticCount != 1 {
+		t.Fatalf("按日期与构建分组错误: %+v", sampleGroupRows)
+	}
+	unknownFieldRows := instance.finalizeUnknownFields()
+	if len(unknownFieldRows) != 1 ||
+		unknownFieldRows[0].FieldPath != "payload.futureMetricKitField" ||
+		unknownFieldRows[0].OccurrenceCount != 1 {
+		t.Fatalf("未来 MetricKit 字段清单错误: %+v", unknownFieldRows)
+	}
+	if err := instance.writeReports(
+		rows,
+		measurementRows,
+		signpostRows,
+		sampleGroupRows,
+		unknownFieldRows,
+	); err != nil {
 		t.Fatalf("写分析报告失败: %v", err)
 	}
 
@@ -98,6 +117,8 @@ func TestAnalyzerExtractsSignpostPercentilesAndSymbolicatesDiagnostics(t *testin
 	if !bytes.Contains(summary, []byte("ModelRequestStreaming")) ||
 		!bytes.Contains(summary, []byte("ChatViewModel.processStream")) ||
 		!bytes.Contains(summary, []byte("cumulativeCPUTime")) ||
+		!bytes.Contains(summary, []byte("futureMetricKitField")) ||
+		!bytes.Contains(summary, []byte("2026-07-26")) ||
 		!bytes.Contains(summary, []byte("iOS")) {
 		t.Fatalf("摘要未包含关键 MXSignpost 或符号: %s", summary)
 	}
@@ -149,6 +170,9 @@ func TestAnalyzeReportsMissingDSYMWithoutDiscardingRawIndex(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "raw-index.csv")); err != nil {
 		t.Fatalf("无 dSYM 时仍应生成原始索引: %v", err)
+	}
+	if result.SampleGroupCount != 1 || result.UnknownFieldCount != 1 {
+		t.Fatalf("样本分组与未知字段计数错误: %+v", result)
 	}
 }
 
@@ -208,9 +232,10 @@ func TestAnalyzeReportsInvalidFileAndContinues(t *testing.T) {
 
 func TestAnalyzerKeepsReleaseDimensionsSeparate(t *testing.T) {
 	instance := &analyzer{
-		histograms:   make(map[histogramKey]*histogramAccumulator),
-		measurements: make(map[measurementKey]*measurementAccumulator),
-		signposts:    make(map[signpostKey]*signpostAccumulator),
+		histograms:    make(map[histogramKey]*histogramAccumulator),
+		measurements:  make(map[measurementKey]*measurementAccumulator),
+		signposts:     make(map[signpostKey]*signpostAccumulator),
+		unknownFields: make(map[unknownFieldKey]int),
 	}
 	testFlight := indexRow{
 		AppVersion:   "2.7.0",
@@ -274,6 +299,9 @@ func testEnvelopeFixture() map[string]any {
 			"contains_user_identifier": false,
 		},
 		"payload": map[string]any{
+			"futureMetricKitField": map[string]any{
+				"sample": 1,
+			},
 			"cpuMetrics": map[string]any{
 				"cumulativeCPUTime": "1.5 s",
 			},

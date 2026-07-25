@@ -36,6 +36,7 @@ type analyzer struct {
 	histograms       map[histogramKey]*histogramAccumulator
 	measurements     map[measurementKey]*measurementAccumulator
 	signposts        map[signpostKey]*signpostAccumulator
+	unknownFields    map[unknownFieldKey]int
 	missing          map[string]*missingSymbolRow
 	parseErrors      []parseErrorRow
 	symbolicated     int
@@ -78,12 +79,13 @@ func Analyze(options Options) (Result, error) {
 		return Result{}, err
 	}
 	instance := &analyzer{
-		options:      options,
-		symbolicator: catalog,
-		histograms:   make(map[histogramKey]*histogramAccumulator),
-		measurements: make(map[measurementKey]*measurementAccumulator),
-		signposts:    make(map[signpostKey]*signpostAccumulator),
-		missing:      make(map[string]*missingSymbolRow),
+		options:       options,
+		symbolicator:  catalog,
+		histograms:    make(map[histogramKey]*histogramAccumulator),
+		measurements:  make(map[measurementKey]*measurementAccumulator),
+		signposts:     make(map[signpostKey]*signpostAccumulator),
+		unknownFields: make(map[unknownFieldKey]int),
+		missing:       make(map[string]*missingSymbolRow),
 	}
 	if err := instance.scan(); err != nil {
 		return Result{}, err
@@ -91,20 +93,30 @@ func Analyze(options Options) (Result, error) {
 	histogramRows := instance.finalizeHistograms()
 	measurementRows := instance.finalizeMeasurements()
 	signpostRows := instance.finalizeSignposts()
-	if err := instance.writeReports(histogramRows, measurementRows, signpostRows); err != nil {
+	sampleGroupRows := instance.finalizeSampleGroups()
+	unknownFieldRows := instance.finalizeUnknownFields()
+	if err := instance.writeReports(
+		histogramRows,
+		measurementRows,
+		signpostRows,
+		sampleGroupRows,
+		unknownFieldRows,
+	); err != nil {
 		return Result{}, err
 	}
 	return Result{
-		OutputDir:        options.OutputDir,
-		FileCount:        len(instance.indexRows),
-		MetricCount:      instance.metricCount,
-		DiagnosticCount:  instance.diagnosticCount,
-		HistogramCount:   len(histogramRows),
-		MeasurementCount: len(measurementRows),
-		SignpostCount:    len(signpostRows),
-		Symbolicated:     instance.symbolicated,
-		MissingSymbols:   len(instance.missing),
-		ParseErrorCount:  len(instance.parseErrors),
+		OutputDir:         options.OutputDir,
+		FileCount:         len(instance.indexRows),
+		MetricCount:       instance.metricCount,
+		DiagnosticCount:   instance.diagnosticCount,
+		HistogramCount:    len(histogramRows),
+		MeasurementCount:  len(measurementRows),
+		SignpostCount:     len(signpostRows),
+		SampleGroupCount:  len(sampleGroupRows),
+		UnknownFieldCount: len(unknownFieldRows),
+		Symbolicated:      instance.symbolicated,
+		MissingSymbols:    len(instance.missing),
+		ParseErrorCount:   len(instance.parseErrors),
 	}, nil
 }
 
@@ -189,6 +201,7 @@ func (a *analyzer) processFile(path, symbolicatedRoot string) error {
 	a.collectMeasurements(payload, "payload", row)
 	a.collectSignposts(payload, row)
 	a.collectDiagnostics(payload, row)
+	a.collectUnknownTopLevelFields(payload, row)
 
 	relativePath, err := filepath.Rel(a.options.InputDir, path)
 	if err != nil {

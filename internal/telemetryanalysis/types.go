@@ -17,16 +17,18 @@ type Options struct {
 
 // Result 是便于脚本继续校验的分析结果摘要。
 type Result struct {
-	OutputDir        string `json:"output_dir"`
-	FileCount        int    `json:"file_count"`
-	MetricCount      int    `json:"metric_count"`
-	DiagnosticCount  int    `json:"diagnostic_count"`
-	HistogramCount   int    `json:"histogram_count"`
-	MeasurementCount int    `json:"measurement_count"`
-	SignpostCount    int    `json:"signpost_count"`
-	Symbolicated     int    `json:"symbolicated_frames"`
-	MissingSymbols   int    `json:"missing_symbol_uuids"`
-	ParseErrorCount  int    `json:"parse_error_count"`
+	OutputDir         string `json:"output_dir"`
+	FileCount         int    `json:"file_count"`
+	MetricCount       int    `json:"metric_count"`
+	DiagnosticCount   int    `json:"diagnostic_count"`
+	HistogramCount    int    `json:"histogram_count"`
+	MeasurementCount  int    `json:"measurement_count"`
+	SignpostCount     int    `json:"signpost_count"`
+	SampleGroupCount  int    `json:"sample_group_count"`
+	UnknownFieldCount int    `json:"unknown_field_count"`
+	Symbolicated      int    `json:"symbolicated_frames"`
+	MissingSymbols    int    `json:"missing_symbol_uuids"`
+	ParseErrorCount   int    `json:"parse_error_count"`
 }
 
 type indexRow struct {
@@ -141,6 +143,27 @@ type diagnosticStackRow struct {
 type parseErrorRow struct {
 	SourcePath string
 	Error      string
+}
+
+type sampleGroupKey struct {
+	Date string
+	analysisDimensions
+}
+
+type sampleGroupRow struct {
+	sampleGroupKey
+	MetricCount     int
+	DiagnosticCount int
+}
+
+type unknownFieldKey struct {
+	analysisDimensions
+	FieldPath string
+}
+
+type unknownFieldRow struct {
+	unknownFieldKey
+	OccurrenceCount int
 }
 
 type missingSymbolRow struct {

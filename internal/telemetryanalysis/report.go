@@ -14,6 +14,8 @@ func (a *analyzer) writeReports(
 	histograms []histogramRow,
 	measurements []measurementRow,
 	signposts []signpostRow,
+	sampleGroups []sampleGroupRow,
+	unknownFields []unknownFieldRow,
 ) error {
 	if err := writeCSV(
 		filepath.Join(a.options.OutputDir, "raw-index.csv"),
@@ -43,6 +45,31 @@ func (a *analyzer) writeReports(
 	}
 
 	if err := writeCSV(
+		filepath.Join(a.options.OutputDir, "sample-groups.csv"),
+		[]string{
+			"date", "app_version", "app_build", "distribution", "os_version",
+			"device_class", "metric_count", "diagnostic_count", "total_count",
+		},
+		func(writer *csv.Writer) error {
+			for _, row := range sampleGroups {
+				total := row.MetricCount + row.DiagnosticCount
+				if err := writer.Write([]string{
+					row.Date, row.AppVersion, row.AppBuild, row.Distribution,
+					row.OSVersion, row.DeviceClass,
+					strconv.Itoa(row.MetricCount),
+					strconv.Itoa(row.DiagnosticCount),
+					strconv.Itoa(total),
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	); err != nil {
+		return err
+	}
+
+	if err := writeCSV(
 		filepath.Join(a.options.OutputDir, "histograms.csv"),
 		[]string{
 			"app_version", "app_build", "distribution", "os_version",
@@ -55,6 +82,28 @@ func (a *analyzer) writeReports(
 					row.DeviceClass, row.MetricPath, row.Unit,
 					strconv.FormatInt(row.Count, 10),
 					csvFloat(row.P50), csvFloat(row.P90), csvFloat(row.P99),
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	); err != nil {
+		return err
+	}
+
+	if err := writeCSV(
+		filepath.Join(a.options.OutputDir, "unknown-fields.csv"),
+		[]string{
+			"app_version", "app_build", "distribution", "os_version",
+			"device_class", "field_path", "occurrence_count",
+		},
+		func(writer *csv.Writer) error {
+			for _, row := range unknownFields {
+				if err := writer.Write([]string{
+					row.AppVersion, row.AppBuild, row.Distribution, row.OSVersion,
+					row.DeviceClass, row.FieldPath,
+					strconv.Itoa(row.OccurrenceCount),
 				}); err != nil {
 					return err
 				}
@@ -185,7 +234,14 @@ func (a *analyzer) writeReports(
 		return err
 	}
 
-	return a.writeMarkdownSummary(histograms, measurements, signposts, missingRows)
+	return a.writeMarkdownSummary(
+		histograms,
+		measurements,
+		signposts,
+		sampleGroups,
+		unknownFields,
+		missingRows,
+	)
 }
 
 func (a *analyzer) writeDiagnosticStacks() error {
@@ -235,6 +291,8 @@ func (a *analyzer) writeMarkdownSummary(
 	histograms []histogramRow,
 	measurements []measurementRow,
 	signposts []signpostRow,
+	sampleGroups []sampleGroupRow,
+	unknownFields []unknownFieldRow,
 	missingRows []missingSymbolRow,
 ) error {
 	var builder strings.Builder
@@ -247,7 +305,29 @@ func (a *analyzer) writeMarkdownSummary(
 	))
 	builder.WriteString(fmt.Sprintf("- 已符号化调用栈帧：%d\n", a.symbolicated))
 	builder.WriteString(fmt.Sprintf("- 缺少或无法使用的符号 UUID：%d\n", len(missingRows)))
+	builder.WriteString(fmt.Sprintf("- 当前分析器未识别的顶层字段：%d\n", len(unknownFields)))
 	builder.WriteString(fmt.Sprintf("- 无法解析的原始文件：%d\n", len(a.parseErrors)))
+
+	builder.WriteString("\n## 按日期与构建的样本分布\n\n")
+	builder.WriteString("| 日期 | 版本 | 构建 | 分发 | iOS | 设备 | Metric | Diagnostic | 合计 |\n")
+	builder.WriteString("| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |\n")
+	for _, row := range sampleGroups {
+		builder.WriteString(fmt.Sprintf(
+			"| %s | %s | %s | %s | %s | %s | %d | %d | %d |\n",
+			escapeMarkdown(row.Date),
+			escapeMarkdown(row.AppVersion),
+			escapeMarkdown(row.AppBuild),
+			escapeMarkdown(row.Distribution),
+			escapeMarkdown(row.OSVersion),
+			escapeMarkdown(row.DeviceClass),
+			row.MetricCount,
+			row.DiagnosticCount,
+			row.MetricCount+row.DiagnosticCount,
+		))
+	}
+	if len(sampleGroups) == 0 {
+		builder.WriteString("| — | — | — | — | — | — | 0 | 0 | 0 |\n")
+	}
 
 	builder.WriteString("\n## 待优先复查的性能线索\n\n")
 	clues := performanceClues(histograms)
@@ -380,6 +460,27 @@ func (a *analyzer) writeMarkdownSummary(
 	if len(a.parseErrors) == 0 {
 		builder.WriteString("| — | 无 |\n")
 	}
+
+	builder.WriteString("\n## 当前分析器未识别的 MetricKit 顶层字段\n\n")
+	builder.WriteString("| 构建 | 分发 | iOS | 设备 | 字段 | 出现次数 |\n")
+	builder.WriteString("| --- | --- | --- | --- | --- | ---: |\n")
+	for _, row := range unknownFields {
+		builder.WriteString(fmt.Sprintf(
+			"| %s | %s | %s | %s | `%s` | %d |\n",
+			escapeMarkdown(row.AppBuild),
+			escapeMarkdown(row.Distribution),
+			escapeMarkdown(row.OSVersion),
+			escapeMarkdown(row.DeviceClass),
+			escapeMarkdownCode(row.FieldPath),
+			row.OccurrenceCount,
+		))
+	}
+	if len(unknownFields) == 0 {
+		builder.WriteString("| — | — | — | — | 无 | 0 |\n")
+	}
+	builder.WriteString(
+		"\n未识别字段仍完整保留在 raw 与 symbolicated JSON 中；此清单用于提示更新本地分析规则。\n",
+	)
 
 	builder.WriteString(
 		"\n> 分位数使用 MetricKit 直方图桶上界近似；报告中的“样本”和次数不是用户数。" +

@@ -131,6 +131,8 @@ jq -e '
   .histogram_count == 1 and
   .measurement_count > 0 and
   .signpost_count == 1 and
+  .sample_group_count == 1 and
+  .unknown_field_count == 0 and
   .parse_error_count == 0
 ' "$test_root/analyzer-result.json" >/dev/null
 grep -F 'ModelRequestStreaming' "$analysis_dir/summary.md" >/dev/null
@@ -139,6 +141,8 @@ grep -F 'testflight' "$analysis_dir/histograms.csv" >/dev/null
 grep -F '26.0' "$analysis_dir/measurements.csv" >/dev/null
 grep -F 'ModelRequestStreaming' "$analysis_dir/signposts.csv" >/dev/null
 grep -F 'hangDiagnostics' "$analysis_dir/diagnostic-stacks.md" >/dev/null
+grep -F 'e2e-270' "$analysis_dir/sample-groups.csv" >/dev/null
+[[ -f "$analysis_dir/unknown-fields.csv" ]]
 [[ -f "$analysis_dir/parse-errors.csv" ]]
 
 printf 'telemetry-e2e-local: OK\n'

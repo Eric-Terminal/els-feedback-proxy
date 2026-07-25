@@ -59,9 +59,9 @@ func run(args []string) error {
   --dsym PATH           .dSYM 或其上级目录，可重复
   --spotlight=false     禁止使用 Spotlight 自动查找 UUID
 
-输出包含 raw-index.csv、histograms.csv、measurements.csv、signposts.csv、
-diagnostics.csv、diagnostic-stacks.md、parse-errors.csv、missing-symbols.csv、
-summary.md 和逐文件 symbolicated/ JSON。`)
+输出包含 raw-index.csv、sample-groups.csv、histograms.csv、measurements.csv、
+signposts.csv、diagnostics.csv、diagnostic-stacks.md、unknown-fields.csv、
+parse-errors.csv、missing-symbols.csv、summary.md 和逐文件 symbolicated/ JSON。`)
 	}
 	if err := flags.Parse(args); err != nil {
 		return err

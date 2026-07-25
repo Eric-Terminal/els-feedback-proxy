@@ -210,9 +210,10 @@ cd /path/to/ETOS-Telemetry
 落盘文件再确认。
 
 分析脚本会按 App 构建、分发渠道、iOS 版本和设备类型生成原始索引，
-MetricKit/MXSignpost 直方图的 P50/P90/P99、CPU/内存/磁盘/网络等测量值、
-Signpost 调用次数、诊断列表与完整调用栈、解析失败清单、Markdown 摘要、
-逐文件符号化 JSON 与缺失 dSYM UUID 清单：
+按日期与构建的样本分组、MetricKit/MXSignpost 直方图的 P50/P90/P99、
+CPU/内存/磁盘/网络等测量值、Signpost 调用次数、诊断列表与完整调用栈、
+分析器未识别字段和解析失败清单、Markdown 摘要、逐文件符号化 JSON 与缺失
+dSYM UUID 清单：
 
 ```bash
 /path/to/els-feedback-proxy/scripts/telemetry-analyze.sh \
