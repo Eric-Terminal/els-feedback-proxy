@@ -517,7 +517,11 @@ paths:
         - announcementAdminToken: []
       responses:
         '200':
-          description: 条数、字节数、分类统计与保留上限
+          description: 条数、字节数、分类统计、保留上限与最近接收、清理、确认活动
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryStatus'
         '401':
           description: 管理鉴权失败
   /v1/admin/telemetry/manifest:
@@ -953,6 +957,59 @@ components:
               file_sha256:
                 type: string
                 pattern: '^[a-f0-9]{64}$'
+    TelemetryStatus:
+      type: object
+      required:
+        - schema_version
+        - generated_at
+        - retention_days
+        - max_total_bytes
+        - total_bytes
+        - total_count
+        - metric_count
+        - diagnostic_count
+        - last_cleanup_count
+        - last_confirmed_count
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        generated_at:
+          type: string
+          format: date-time
+        retention_days:
+          type: integer
+        max_total_bytes:
+          type: integer
+          format: int64
+        total_bytes:
+          type: integer
+          format: int64
+        total_count:
+          type: integer
+        metric_count:
+          type: integer
+        diagnostic_count:
+          type: integer
+        oldest_received_at:
+          type: string
+          format: date-time
+        newest_received_at:
+          type: string
+          format: date-time
+        last_received_at:
+          type: string
+          format: date-time
+        last_cleanup_at:
+          type: string
+          format: date-time
+        last_cleanup_count:
+          type: integer
+        last_confirmed_at:
+          type: string
+          format: date-time
+        last_confirmed_count:
+          type: integer
     UpdateTimeline:
       type: object
       required: [version, branch, commits]

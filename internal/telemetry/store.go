@@ -42,16 +42,21 @@ type Manifest struct {
 }
 
 type Status struct {
-	SchemaVersion   int        `json:"schema_version"`
-	GeneratedAt     time.Time  `json:"generated_at"`
-	RetentionDays   int        `json:"retention_days"`
-	MaxTotalBytes   int64      `json:"max_total_bytes"`
-	TotalBytes      int64      `json:"total_bytes"`
-	TotalCount      int        `json:"total_count"`
-	MetricCount     int        `json:"metric_count"`
-	DiagnosticCount int        `json:"diagnostic_count"`
-	OldestReceived  *time.Time `json:"oldest_received_at,omitempty"`
-	NewestReceived  *time.Time `json:"newest_received_at,omitempty"`
+	SchemaVersion      int        `json:"schema_version"`
+	GeneratedAt        time.Time  `json:"generated_at"`
+	RetentionDays      int        `json:"retention_days"`
+	MaxTotalBytes      int64      `json:"max_total_bytes"`
+	TotalBytes         int64      `json:"total_bytes"`
+	TotalCount         int        `json:"total_count"`
+	MetricCount        int        `json:"metric_count"`
+	DiagnosticCount    int        `json:"diagnostic_count"`
+	OldestReceived     *time.Time `json:"oldest_received_at,omitempty"`
+	NewestReceived     *time.Time `json:"newest_received_at,omitempty"`
+	LastReceivedAt     *time.Time `json:"last_received_at,omitempty"`
+	LastCleanupAt      *time.Time `json:"last_cleanup_at,omitempty"`
+	LastCleanupCount   int        `json:"last_cleanup_count"`
+	LastConfirmedAt    *time.Time `json:"last_confirmed_at,omitempty"`
+	LastConfirmedCount int        `json:"last_confirmed_count"`
 }
 
 type ConfirmResult struct {
@@ -60,13 +65,22 @@ type ConfirmResult struct {
 }
 
 type manifestState struct {
-	Version int             `json:"version"`
-	Entries []ManifestEntry `json:"entries"`
+	Version  int             `json:"version"`
+	Entries  []ManifestEntry `json:"entries"`
+	Activity activityState   `json:"activity"`
 }
 
 type seenState struct {
 	Version int                  `json:"version"`
 	Records map[string]time.Time `json:"records"`
+}
+
+type activityState struct {
+	LastReceivedAt     *time.Time `json:"last_received_at,omitempty"`
+	LastCleanupAt      *time.Time `json:"last_cleanup_at,omitempty"`
+	LastCleanupCount   int        `json:"last_cleanup_count"`
+	LastConfirmedAt    *time.Time `json:"last_confirmed_at,omitempty"`
+	LastConfirmedCount int        `json:"last_confirmed_count"`
 }
 
 type Store struct {
@@ -80,6 +94,7 @@ type Store struct {
 	now          func() time.Time
 	entries      map[string]ManifestEntry
 	seen         map[string]time.Time
+	activity     activityState
 }
 
 func NewStore(dataDir string, options StoreOptions) (*Store, error) {
@@ -161,9 +176,12 @@ func (s *Store) Save(item ValidatedEnvelope) (string, error) {
 	}
 	s.entries[payloadID] = entry
 	s.seen[payloadID] = now
+	previousActivity := s.activity
+	s.activity.LastReceivedAt = &now
 	if err := s.saveStateLocked(); err != nil {
 		delete(s.entries, payloadID)
 		delete(s.seen, payloadID)
+		s.activity = previousActivity
 		_ = os.Remove(target)
 		return "", err
 	}
@@ -181,11 +199,16 @@ func (s *Store) Status() Status {
 	defer s.mu.RUnlock()
 
 	status := Status{
-		SchemaVersion: SchemaVersion,
-		GeneratedAt:   s.now().UTC(),
-		RetentionDays: int(s.retention / (24 * time.Hour)),
-		MaxTotalBytes: s.maxTotalSize,
-		TotalCount:    len(s.entries),
+		SchemaVersion:      SchemaVersion,
+		GeneratedAt:        s.now().UTC(),
+		RetentionDays:      int(s.retention / (24 * time.Hour)),
+		MaxTotalBytes:      s.maxTotalSize,
+		TotalCount:         len(s.entries),
+		LastReceivedAt:     s.activity.LastReceivedAt,
+		LastCleanupAt:      s.activity.LastCleanupAt,
+		LastCleanupCount:   s.activity.LastCleanupCount,
+		LastConfirmedAt:    s.activity.LastConfirmedAt,
+		LastConfirmedCount: s.activity.LastConfirmedCount,
 	}
 	entries := s.sortedEntriesLocked()
 	for _, entry := range entries {
@@ -268,6 +291,11 @@ func (s *Store) Confirm(payloadIDs []string) (ConfirmResult, error) {
 	}
 	sort.Strings(result.ConfirmedPayloadIDs)
 	sort.Strings(result.MissingPayloadIDs)
+	if len(result.ConfirmedPayloadIDs) > 0 {
+		confirmedAt := s.now().UTC()
+		s.activity.LastConfirmedAt = &confirmedAt
+		s.activity.LastConfirmedCount = len(result.ConfirmedPayloadIDs)
+	}
 	if err := s.saveManifestLocked(); err != nil {
 		return ConfirmResult{}, err
 	}
@@ -327,6 +355,8 @@ func (s *Store) cleanupLocked() (int, error) {
 			delete(s.seen, payloadID)
 		}
 	}
+	s.activity.LastCleanupAt = &now
+	s.activity.LastCleanupCount = removed
 	if err := s.saveStateLocked(); err != nil {
 		return removed, err
 	}
@@ -391,6 +421,7 @@ func (s *Store) load() error {
 			}
 			s.entries[entry.PayloadID] = entry
 		}
+		s.activity = state.Activity
 		return nil
 	}); err != nil {
 		return fmt.Errorf("加载遥测清单失败: %w", err)
@@ -416,6 +447,11 @@ func (s *Store) load() error {
 		if _, exists := s.seen[payloadID]; !exists {
 			s.seen[payloadID] = entry.ReceivedAt
 		}
+	}
+	if s.activity.LastReceivedAt == nil && len(s.entries) > 0 {
+		entries := s.sortedEntriesLocked()
+		receivedAt := entries[len(entries)-1].ReceivedAt
+		s.activity.LastReceivedAt = &receivedAt
 	}
 	return s.reconcileLocked()
 }
@@ -532,7 +568,11 @@ func (s *Store) saveStateLocked() error {
 }
 
 func (s *Store) saveManifestLocked() error {
-	state := manifestState{Version: stateVersion, Entries: s.sortedEntriesLocked()}
+	state := manifestState{
+		Version:  stateVersion,
+		Entries:  s.sortedEntriesLocked(),
+		Activity: s.activity,
+	}
 	if err := writeJSONAtomic(s.manifestFile, state); err != nil {
 		return fmt.Errorf("保存遥测清单失败: %w", err)
 	}

@@ -23,11 +23,21 @@ func TestStorePersistsDeduplicatesAndConfirmsPrecisely(t *testing.T) {
 	if err != nil {
 		t.Fatalf("初始化遥测存储失败: %v", err)
 	}
+	initialStatus := store.Status()
+	if initialStatus.LastCleanupAt == nil ||
+		!initialStatus.LastCleanupAt.Equal(now) ||
+		initialStatus.LastCleanupCount != 0 {
+		t.Fatalf("初始化清理状态错误: %+v", initialStatus)
+	}
 	item := decodeStoredTestEnvelope(t, PayloadKindDiagnostic, `{"hang":1}`, now)
 
 	status, err := store.Save(item)
 	if err != nil || status != "accepted" {
 		t.Fatalf("首次保存应 accepted，status=%q err=%v", status, err)
+	}
+	savedStatus := store.Status()
+	if savedStatus.LastReceivedAt == nil || !savedStatus.LastReceivedAt.Equal(now) {
+		t.Fatalf("最近接收时间错误: %+v", savedStatus)
 	}
 	status, err = store.Save(item)
 	if err != nil || status != "duplicate" {
@@ -54,6 +64,7 @@ func TestStorePersistsDeduplicatesAndConfirmsPrecisely(t *testing.T) {
 	if err != nil || status != "duplicate" {
 		t.Fatalf("重启后仍应持久去重，status=%q err=%v", status, err)
 	}
+	now = now.Add(time.Minute)
 	confirm, err := reloaded.Confirm([]string{item.Envelope.PayloadID})
 	if err != nil || len(confirm.ConfirmedPayloadIDs) != 1 {
 		t.Fatalf("精确确认失败: result=%+v err=%v", confirm, err)
@@ -64,6 +75,18 @@ func TestStorePersistsDeduplicatesAndConfirmsPrecisely(t *testing.T) {
 	confirm, err = reloaded.Confirm([]string{item.Envelope.PayloadID})
 	if err != nil || len(confirm.ConfirmedPayloadIDs) != 1 {
 		t.Fatalf("重复确认应保持幂等: result=%+v err=%v", confirm, err)
+	}
+	reloadedAgain, err := NewStore(dataDir, options)
+	if err != nil {
+		t.Fatalf("再次加载遥测存储失败: %v", err)
+	}
+	activity := reloadedAgain.Status()
+	if activity.LastReceivedAt == nil ||
+		!activity.LastReceivedAt.Equal(now.Add(-time.Minute)) ||
+		activity.LastConfirmedAt == nil ||
+		!activity.LastConfirmedAt.Equal(now) ||
+		activity.LastConfirmedCount != 1 {
+		t.Fatalf("接收和确认活动状态应跨重启持久化: %+v", activity)
 	}
 }
 
@@ -160,6 +183,12 @@ func TestStoreCleanupExpiresRecordsAndSeenState(t *testing.T) {
 	}
 	if len(store.Manifest().Entries) != 0 {
 		t.Fatalf("过期后清单应为空")
+	}
+	cleanupStatus := store.Status()
+	if cleanupStatus.LastCleanupAt == nil ||
+		!cleanupStatus.LastCleanupAt.Equal(now) ||
+		cleanupStatus.LastCleanupCount != 1 {
+		t.Fatalf("最近清理状态错误: %+v", cleanupStatus)
 	}
 	if status, err := store.Save(item); err != nil || status != "accepted" {
 		t.Fatalf("去重状态过期后应允许重新接收，status=%q err=%v", status, err)
