@@ -188,6 +188,51 @@ ELS_ADMIN_URL=http://192.168.31.102:8521 ./els-feedback-proxy announcement list
 `size_bytes`、`file_sha256` 且确认文件是有效 JSON 后，才可调用 `confirm`。
 确认接口按 `payload_id` 精确删除，并允许网络重试导致的重复确认。
 
+## Mac 遥测归档与分析
+
+`scripts/telemetry-pull.sh` 是需要在 iTerm 中保持运行的前台脚本，不会安装
+LaunchAgent 或后台服务。它通过 SSH 在服务器上加载 `.env` 并调用管理 CLI，
+因此 `ANNOUNCEMENT_ADMIN_TOKEN` 不会进入 Mac 的参数、文件或日志。长期归档
+默认写入运行命令时所在的目录，也可通过 `--archive` 显式指定。
+
+执行单轮拉取或保持前台定时拉取：
+
+```bash
+cd /path/to/ETOS-Telemetry
+/path/to/els-feedback-proxy/scripts/telemetry-pull.sh --host <SSH用户@服务器> --once
+/path/to/els-feedback-proxy/scripts/telemetry-pull.sh --host <SSH用户@服务器> --interval 900
+```
+
+脚本会保存每轮服务端清单，并按服务端 UTC 接收日期写入
+`raw/YYYY-MM-DD/`。每个文件必须通过清单字节数、文件 SHA-256、JSON schema
+与五项隐私声明校验，之后才会从 `.partial` 原子替换为正式文件。所有文件完成
+校验后，脚本最多每 512 个 ID 调用一次精确确认；中途中断时，下轮会重新验证已
+落盘文件再确认。
+
+分析脚本会生成原始索引、诊断列表、MetricKit/MXSignpost 直方图的
+P50/P90/P99、Markdown 摘要、逐文件符号化 JSON 与缺失 dSYM UUID 清单：
+
+```bash
+/path/to/els-feedback-proxy/scripts/telemetry-analyze.sh \
+  --xcarchive '/path/to/Xcode Cloud Build.xcarchive'
+```
+
+可以重复传入 `--xcarchive` 或 `--dsym`。工具先使用 `dwarfdump --uuid` 做严格
+UUID 匹配，再用 `atos` 将地址转换为函数和源码行；没有显式路径时默认按 UUID
+使用 Spotlight 查找本机 dSYM。Apple 说明只有构建 UUID 匹配的 dSYM 才能正确
+符号化，相关规则见
+[Adding identifiable symbol names to a crash report](https://developer.apple.com/documentation/xcode/adding-identifiable-symbol-names-to-a-crash-report)。
+直方图分位数以桶上界近似，跨构建比较时应保持设备类型与单位一致。
+
+本地回归包含损坏传输、重复确认、Swift 生成请求到 Go 再到 Mac 归档分析，以及
+真实临时 dSYM/UUID/`atos` 符号化：
+
+```bash
+scripts/tests/telemetry-pull-test.sh
+scripts/tests/telemetry-e2e-local.sh
+scripts/tests/telemetry-symbolication-test.sh
+```
+
 ## Cloudflare 缓存与防护
 
 服务会为公告、意见征集定义、官方数据清单和文件返回 `Cloudflare-CDN-Cache-Control`。公告、征集与清单提供内容 ETag；文件 URL 包含 SHA-256，内容变化后 URL 也会变化，因此可以长期不可变缓存。建议在 Cloudflare Cache Rules 中缓存这些只读路径，同时让答卷和反馈提交接口保持绕过缓存。
