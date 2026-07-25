@@ -80,6 +80,12 @@ file_sha256() {
 remote_cli() {
   local arguments="$1"
   # 管理口令只在远端 shell 读取，不能通过 SSH 输出或本机环境传递。
+  ssh -n -o BatchMode=yes -o ConnectTimeout=15 "$ssh_host" \
+    "cd $remote_dir && set -a && . ./.env && set +a && ./els-feedback-proxy telemetry $arguments"
+}
+
+remote_cli_with_input() {
+  local arguments="$1"
   ssh -o BatchMode=yes -o ConnectTimeout=15 "$ssh_host" \
     "cd $remote_dir && set -a && . ./.env && set +a && ./els-feedback-proxy telemetry $arguments"
 }
@@ -133,7 +139,7 @@ confirm_verified_files() {
       --argjson size "$batch_size" \
       '[inputs] | {payload_ids: .[$start:($start + $size)]}' \
       "$ids_file" > "$body_file" || return 1
-    if ! remote_cli "confirm --file -" < "$body_file" > "$response_file"; then
+    if ! remote_cli_with_input "confirm --file -" < "$body_file" > "$response_file"; then
       fail "服务器确认失败；本地文件已保留，下轮会安全重试"
       return 1
     fi
