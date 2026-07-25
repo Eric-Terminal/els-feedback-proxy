@@ -209,8 +209,10 @@ cd /path/to/ETOS-Telemetry
 校验后，脚本最多每 512 个 ID 调用一次精确确认；中途中断时，下轮会重新验证已
 落盘文件再确认。
 
-分析脚本会生成原始索引、诊断列表、MetricKit/MXSignpost 直方图的
-P50/P90/P99、Markdown 摘要、逐文件符号化 JSON 与缺失 dSYM UUID 清单：
+分析脚本会按 App 构建、分发渠道、iOS 版本和设备类型生成原始索引，
+MetricKit/MXSignpost 直方图的 P50/P90/P99、CPU/内存/磁盘/网络等测量值、
+Signpost 调用次数、诊断列表与完整调用栈、解析失败清单、Markdown 摘要、
+逐文件符号化 JSON 与缺失 dSYM UUID 清单：
 
 ```bash
 /path/to/els-feedback-proxy/scripts/telemetry-analyze.sh \
@@ -222,7 +224,8 @@ UUID 匹配，再用 `atos` 将地址转换为函数和源码行；没有显式�
 使用 Spotlight 查找本机 dSYM。Apple 说明只有构建 UUID 匹配的 dSYM 才能正确
 符号化，相关规则见
 [Adding identifiable symbol names to a crash report](https://developer.apple.com/documentation/xcode/adding-identifiable-symbol-names-to-a-crash-report)。
-直方图分位数以桶上界近似，跨构建比较时应保持设备类型与单位一致。
+直方图分位数以桶上界近似。跨构建比较时应保持分发渠道、iOS 版本、设备类型
+与单位一致；摘要中的长尾和高频项是定位线索，不会自动证明某段代码就是根因。
 
 本地回归包含损坏传输、重复确认、Swift 生成请求到 Go 再到 Mac 归档分析，以及
 真实临时 dSYM/UUID/`atos` 符号化：

@@ -15,16 +15,32 @@ import (
 
 var arrayIndexPattern = regexp.MustCompile(`\[\d+\]`)
 
+type inputFileError struct {
+	err error
+}
+
+func (e *inputFileError) Error() string {
+	return e.err.Error()
+}
+
+func (e *inputFileError) Unwrap() error {
+	return e.err
+}
+
 type analyzer struct {
-	options         Options
-	symbolicator    frameSymbolicator
-	indexRows       []indexRow
-	diagnosticRows  []diagnosticRow
-	histograms      map[histogramKey]*histogramAccumulator
-	missing         map[string]*missingSymbolRow
-	symbolicated    int
-	metricCount     int
-	diagnosticCount int
+	options          Options
+	symbolicator     frameSymbolicator
+	indexRows        []indexRow
+	diagnosticRows   []diagnosticRow
+	diagnosticStacks []diagnosticStackRow
+	histograms       map[histogramKey]*histogramAccumulator
+	measurements     map[measurementKey]*measurementAccumulator
+	signposts        map[signpostKey]*signpostAccumulator
+	missing          map[string]*missingSymbolRow
+	parseErrors      []parseErrorRow
+	symbolicated     int
+	metricCount      int
+	diagnosticCount  int
 }
 
 // Analyze 扫描长期归档并生成索引、分位数、诊断和符号化报告。
@@ -65,23 +81,30 @@ func Analyze(options Options) (Result, error) {
 		options:      options,
 		symbolicator: catalog,
 		histograms:   make(map[histogramKey]*histogramAccumulator),
+		measurements: make(map[measurementKey]*measurementAccumulator),
+		signposts:    make(map[signpostKey]*signpostAccumulator),
 		missing:      make(map[string]*missingSymbolRow),
 	}
 	if err := instance.scan(); err != nil {
 		return Result{}, err
 	}
 	histogramRows := instance.finalizeHistograms()
-	if err := instance.writeReports(histogramRows); err != nil {
+	measurementRows := instance.finalizeMeasurements()
+	signpostRows := instance.finalizeSignposts()
+	if err := instance.writeReports(histogramRows, measurementRows, signpostRows); err != nil {
 		return Result{}, err
 	}
 	return Result{
-		OutputDir:       options.OutputDir,
-		FileCount:       len(instance.indexRows),
-		MetricCount:     instance.metricCount,
-		DiagnosticCount: instance.diagnosticCount,
-		HistogramCount:  len(histogramRows),
-		Symbolicated:    instance.symbolicated,
-		MissingSymbols:  len(instance.missing),
+		OutputDir:        options.OutputDir,
+		FileCount:        len(instance.indexRows),
+		MetricCount:      instance.metricCount,
+		DiagnosticCount:  instance.diagnosticCount,
+		HistogramCount:   len(histogramRows),
+		MeasurementCount: len(measurementRows),
+		SignpostCount:    len(signpostRows),
+		Symbolicated:     instance.symbolicated,
+		MissingSymbols:   len(instance.missing),
+		ParseErrorCount:  len(instance.parseErrors),
 	}, nil
 }
 
@@ -103,6 +126,14 @@ func (a *analyzer) scan() error {
 			return nil
 		}
 		if err := a.processFile(path, symbolicatedRoot); err != nil {
+			var inputErr *inputFileError
+			if errors.As(err, &inputErr) {
+				a.parseErrors = append(a.parseErrors, parseErrorRow{
+					SourcePath: path,
+					Error:      inputErr.Error(),
+				})
+				return nil
+			}
 			return fmt.Errorf("分析 %s 失败: %w", path, err)
 		}
 		return nil
@@ -112,20 +143,20 @@ func (a *analyzer) scan() error {
 func (a *analyzer) processFile(path, symbolicatedRoot string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return &inputFileError{err: fmt.Errorf("读取原始文件失败: %w", err)}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var root map[string]any
 	if err := decoder.Decode(&root); err != nil {
-		return fmt.Errorf("原始文件不是有效 JSON: %w", err)
+		return &inputFileError{err: fmt.Errorf("原始文件不是有效 JSON: %w", err)}
 	}
 	if stringValue(root["schema_version"]) != "1" {
-		return errors.New("不支持的 envelope schema_version")
+		return &inputFileError{err: errors.New("不支持的 envelope schema_version")}
 	}
 	payload, ok := root["payload"].(map[string]any)
 	if !ok {
-		return errors.New("envelope.payload 不是 JSON 对象")
+		return &inputFileError{err: errors.New("envelope.payload 不是 JSON 对象")}
 	}
 
 	app := nestedMap(root, "app")
@@ -155,6 +186,8 @@ func (a *analyzer) processFile(path, symbolicatedRoot string) error {
 	binaryInfo := collectBinaryInfo(payload)
 	a.symbolicateFrames(payload, row, binaryInfo)
 	a.collectHistograms(payload, "payload", row, nil)
+	a.collectMeasurements(payload, "payload", row)
+	a.collectSignposts(payload, row)
 	a.collectDiagnostics(payload, row)
 
 	relativePath, err := filepath.Rel(a.options.InputDir, path)
@@ -256,11 +289,9 @@ func (a *analyzer) addHistogram(
 ) {
 	for _, bucket := range buckets {
 		key := histogramKey{
-			AppVersion:  row.AppVersion,
-			AppBuild:    row.AppBuild,
-			DeviceClass: row.DeviceClass,
-			MetricPath:  metricPath,
-			Unit:        bucket.Unit,
+			analysisDimensions: dimensionsFor(row),
+			MetricPath:         metricPath,
+			Unit:               bucket.Unit,
 		}
 		accumulator := a.histograms[key]
 		if accumulator == nil {
@@ -292,11 +323,22 @@ func (a *analyzer) collectDiagnostics(payload map[string]any, row indexRow) {
 				PayloadID:     row.PayloadID,
 				AppVersion:    row.AppVersion,
 				AppBuild:      row.AppBuild,
+				Distribution:  row.Distribution,
+				OSVersion:     row.OSVersion,
 				DeviceClass:   row.DeviceClass,
 				Type:          key,
 				DurationValue: duration,
 				DurationUnit:  unit,
 				TopFrame:      firstUsefulFrame(diagnostic),
+			})
+			a.diagnosticStacks = append(a.diagnosticStacks, diagnosticStackRow{
+				PayloadID:    row.PayloadID,
+				AppBuild:     row.AppBuild,
+				Distribution: row.Distribution,
+				OSVersion:    row.OSVersion,
+				DeviceClass:  row.DeviceClass,
+				Type:         key,
+				Frames:       collectUsefulFrames(diagnostic),
 			})
 		}
 	}
@@ -359,8 +401,8 @@ func firstSymbolicatedFrame(value any) string {
 		if symbol := stringValue(typed["symbolicated"]); symbol != "" {
 			return symbol
 		}
-		for _, child := range typed {
-			if frame := firstSymbolicatedFrame(child); frame != "" {
+		for _, key := range sortedMapKeys(typed) {
+			if frame := firstSymbolicatedFrame(typed[key]); frame != "" {
 				return frame
 			}
 		}
@@ -382,8 +424,8 @@ func firstRawFrame(value any) string {
 				return fmt.Sprintf("%s + 0x%x", binaryName, offset)
 			}
 		}
-		for _, child := range typed {
-			if frame := firstRawFrame(child); frame != "" {
+		for _, key := range sortedMapKeys(typed) {
+			if frame := firstRawFrame(typed[key]); frame != "" {
 				return frame
 			}
 		}
@@ -399,4 +441,39 @@ func firstRawFrame(value any) string {
 
 func normalizeMetricPath(path string) string {
 	return arrayIndexPattern.ReplaceAllString(path, "[]")
+}
+
+func collectUsefulFrames(value any) []string {
+	result := make([]string, 0)
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			if symbol := stringValue(typed["symbolicated"]); symbol != "" {
+				result = append(result, symbol)
+			} else if binaryName := stringValue(typed["binaryName"]); binaryName != "" {
+				if offset, ok := uintValue(typed["offsetIntoBinaryTextSegment"]); ok {
+					result = append(result, fmt.Sprintf("%s + 0x%x", binaryName, offset))
+				}
+			}
+			for _, key := range sortedMapKeys(typed) {
+				walk(typed[key])
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return result
+}
+
+func sortedMapKeys(value map[string]any) []string {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

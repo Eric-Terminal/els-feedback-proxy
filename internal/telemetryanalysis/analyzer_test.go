@@ -48,6 +48,8 @@ func TestAnalyzerExtractsSignpostPercentilesAndSymbolicatesDiagnostics(t *testin
 		},
 		symbolicator: fakeFrameSymbolicator{},
 		histograms:   make(map[histogramKey]*histogramAccumulator),
+		measurements: make(map[measurementKey]*measurementAccumulator),
+		signposts:    make(map[signpostKey]*signpostAccumulator),
 		missing:      make(map[string]*missingSymbolRow),
 	}
 	if err := instance.scan(); err != nil {
@@ -75,7 +77,17 @@ func TestAnalyzerExtractsSignpostPercentilesAndSymbolicatesDiagnostics(t *testin
 		!strings.Contains(instance.diagnosticRows[0].TopFrame, "ChatViewModel.processStream") {
 		t.Fatalf("诊断摘要错误: %+v", instance.diagnosticRows)
 	}
-	if err := instance.writeReports(rows); err != nil {
+	measurementRows := instance.finalizeMeasurements()
+	if !containsMeasurement(measurementRows, "payload.cpuMetrics.cumulativeCPUTime", 1_500, "ms") {
+		t.Fatalf("未提取 CPU 测量值: %+v", measurementRows)
+	}
+	signpostRows := instance.finalizeSignposts()
+	if len(signpostRows) != 1 || signpostRows[0].TotalCount != 4 ||
+		signpostRows[0].OSVersion != "26.0" ||
+		signpostRows[0].Distribution != "testflight" {
+		t.Fatalf("Signpost 次数或分析维度错误: %+v", signpostRows)
+	}
+	if err := instance.writeReports(rows, measurementRows, signpostRows); err != nil {
 		t.Fatalf("写分析报告失败: %v", err)
 	}
 
@@ -84,8 +96,14 @@ func TestAnalyzerExtractsSignpostPercentilesAndSymbolicatesDiagnostics(t *testin
 		t.Fatalf("读取 Markdown 摘要失败: %v", err)
 	}
 	if !bytes.Contains(summary, []byte("ModelRequestStreaming")) ||
-		!bytes.Contains(summary, []byte("ChatViewModel.processStream")) {
+		!bytes.Contains(summary, []byte("ChatViewModel.processStream")) ||
+		!bytes.Contains(summary, []byte("cumulativeCPUTime")) ||
+		!bytes.Contains(summary, []byte("iOS")) {
 		t.Fatalf("摘要未包含关键 MXSignpost 或符号: %s", summary)
+	}
+	stackReport, err := os.ReadFile(filepath.Join(outputDir, "diagnostic-stacks.md"))
+	if err != nil || !bytes.Contains(stackReport, []byte("ChatViewModel.processStream")) {
+		t.Fatalf("诊断调用栈报告缺少符号化帧: %v %s", err, stackReport)
 	}
 	symbolicatedPath := filepath.Join(
 		outputDir,
@@ -156,6 +174,79 @@ func TestAnalyzeRejectsOutputInsideRawInput(t *testing.T) {
 	}
 }
 
+func TestAnalyzeReportsInvalidFileAndContinues(t *testing.T) {
+	inputDir := filepath.Join(t.TempDir(), "raw")
+	outputDir := filepath.Join(t.TempDir(), "analysis")
+	if err := os.MkdirAll(inputDir, 0o755); err != nil {
+		t.Fatalf("创建输入目录失败: %v", err)
+	}
+	writeJSONFixture(t, filepath.Join(inputDir, "valid.json"), testEnvelopeFixture())
+	if err := os.WriteFile(
+		filepath.Join(inputDir, "broken.json"),
+		[]byte("{not-json"),
+		0o600,
+	); err != nil {
+		t.Fatalf("写损坏夹具失败: %v", err)
+	}
+
+	result, err := Analyze(Options{
+		InputDir:     inputDir,
+		OutputDir:    outputDir,
+		UseSpotlight: false,
+	})
+	if err != nil {
+		t.Fatalf("单个损坏文件不应中断其余遥测分析: %v", err)
+	}
+	if result.FileCount != 1 || result.ParseErrorCount != 1 {
+		t.Fatalf("解析失败计数错误: %+v", result)
+	}
+	report, err := os.ReadFile(filepath.Join(outputDir, "parse-errors.csv"))
+	if err != nil || !bytes.Contains(report, []byte("broken.json")) {
+		t.Fatalf("解析失败清单未记录损坏文件: %v %s", err, report)
+	}
+}
+
+func TestAnalyzerKeepsReleaseDimensionsSeparate(t *testing.T) {
+	instance := &analyzer{
+		histograms:   make(map[histogramKey]*histogramAccumulator),
+		measurements: make(map[measurementKey]*measurementAccumulator),
+		signposts:    make(map[signpostKey]*signpostAccumulator),
+	}
+	testFlight := indexRow{
+		AppVersion:   "2.7.0",
+		AppBuild:     "270",
+		Distribution: "testflight",
+		OSVersion:    "26.0",
+		DeviceClass:  "iPhone17,2",
+	}
+	appStore := testFlight
+	appStore.Distribution = "appstore"
+	appStore.OSVersion = "26.1"
+	buckets := []parsedBucket{{Upper: 10, Unit: "ms", Count: 1}}
+
+	instance.addHistogram(testFlight, "payload.launch", buckets)
+	instance.addHistogram(appStore, "payload.launch", buckets)
+	instance.addMeasurement(testFlight, "payload.cpu", 1, "s")
+	instance.addMeasurement(appStore, "payload.cpu", 1, "s")
+	signpost := map[string]any{
+		"signpostCategory": "Lifecycle",
+		"signpostName":     "AppLaunch",
+		"totalCount":       float64(1),
+	}
+	instance.collectSignposts(signpost, testFlight)
+	instance.collectSignposts(signpost, appStore)
+
+	if rows := instance.finalizeHistograms(); len(rows) != 2 {
+		t.Fatalf("不同分发与 iOS 版本的直方图不能合并: %+v", rows)
+	}
+	if rows := instance.finalizeMeasurements(); len(rows) != 2 {
+		t.Fatalf("不同分发与 iOS 版本的测量值不能合并: %+v", rows)
+	}
+	if rows := instance.finalizeSignposts(); len(rows) != 2 {
+		t.Fatalf("不同分发与 iOS 版本的 Signpost 不能合并: %+v", rows)
+	}
+}
+
 func testEnvelopeFixture() map[string]any {
 	return map[string]any{
 		"schema_version": 1,
@@ -183,6 +274,9 @@ func testEnvelopeFixture() map[string]any {
 			"contains_user_identifier": false,
 		},
 		"payload": map[string]any{
+			"cpuMetrics": map[string]any{
+				"cumulativeCPUTime": "1.5 s",
+			},
 			"hangDiagnostics": []any{
 				map[string]any{
 					"hangDuration": map[string]any{"value": 2, "unit": "s"},
@@ -235,6 +329,20 @@ func testEnvelopeFixture() map[string]any {
 			},
 		},
 	}
+}
+
+func containsMeasurement(
+	rows []measurementRow,
+	path string,
+	value float64,
+	unit string,
+) bool {
+	for _, row := range rows {
+		if row.MetricPath == path && row.Total == value && row.Unit == unit {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSONFixture(t *testing.T, path string, payload any) {

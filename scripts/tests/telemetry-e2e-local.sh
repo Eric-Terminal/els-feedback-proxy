@@ -101,7 +101,14 @@ env \
   ANNOUNCEMENT_ADMIN_TOKEN="synthetic-admin-token" \
   ELS_ADMIN_URL="http://127.0.0.1:$admin_port" \
   "$binary" telemetry status |
-  jq -e '.total_count == 0 and .total_bytes == 0' >/dev/null
+  jq -e '
+    .total_count == 0 and
+    .total_bytes == 0 and
+    .last_received_at != null and
+    .last_cleanup_at != null and
+    .last_confirmed_at != null and
+    .last_confirmed_count == 2
+  ' >/dev/null
 
 (
   cd "$archive_root"
@@ -121,9 +128,17 @@ jq -e '
   .file_count == 2 and
   .metric_count == 1 and
   .diagnostic_count == 1 and
-  .histogram_count == 1
+  .histogram_count == 1 and
+  .measurement_count > 0 and
+  .signpost_count == 1 and
+  .parse_error_count == 0
 ' "$test_root/analyzer-result.json" >/dev/null
 grep -F 'ModelRequestStreaming' "$analysis_dir/summary.md" >/dev/null
 grep -F 'hangDiagnostics' "$analysis_dir/summary.md" >/dev/null
+grep -F 'testflight' "$analysis_dir/histograms.csv" >/dev/null
+grep -F '26.0' "$analysis_dir/measurements.csv" >/dev/null
+grep -F 'ModelRequestStreaming' "$analysis_dir/signposts.csv" >/dev/null
+grep -F 'hangDiagnostics' "$analysis_dir/diagnostic-stacks.md" >/dev/null
+[[ -f "$analysis_dir/parse-errors.csv" ]]
 
 printf 'telemetry-e2e-local: OK\n'

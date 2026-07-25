@@ -17,13 +17,16 @@ type Options struct {
 
 // Result 是便于脚本继续校验的分析结果摘要。
 type Result struct {
-	OutputDir       string `json:"output_dir"`
-	FileCount       int    `json:"file_count"`
-	MetricCount     int    `json:"metric_count"`
-	DiagnosticCount int    `json:"diagnostic_count"`
-	HistogramCount  int    `json:"histogram_count"`
-	Symbolicated    int    `json:"symbolicated_frames"`
-	MissingSymbols  int    `json:"missing_symbol_uuids"`
+	OutputDir        string `json:"output_dir"`
+	FileCount        int    `json:"file_count"`
+	MetricCount      int    `json:"metric_count"`
+	DiagnosticCount  int    `json:"diagnostic_count"`
+	HistogramCount   int    `json:"histogram_count"`
+	MeasurementCount int    `json:"measurement_count"`
+	SignpostCount    int    `json:"signpost_count"`
+	Symbolicated     int    `json:"symbolicated_frames"`
+	MissingSymbols   int    `json:"missing_symbol_uuids"`
+	ParseErrorCount  int    `json:"parse_error_count"`
 }
 
 type indexRow struct {
@@ -46,6 +49,8 @@ type diagnosticRow struct {
 	PayloadID     string
 	AppVersion    string
 	AppBuild      string
+	Distribution  string
+	OSVersion     string
 	DeviceClass   string
 	Type          string
 	DurationValue float64
@@ -53,12 +58,18 @@ type diagnosticRow struct {
 	TopFrame      string
 }
 
+type analysisDimensions struct {
+	AppVersion   string
+	AppBuild     string
+	Distribution string
+	OSVersion    string
+	DeviceClass  string
+}
+
 type histogramKey struct {
-	AppVersion  string
-	AppBuild    string
-	DeviceClass string
-	MetricPath  string
-	Unit        string
+	analysisDimensions
+	MetricPath string
+	Unit       string
 }
 
 type weightedBucket struct {
@@ -77,6 +88,59 @@ type histogramRow struct {
 	P50   float64
 	P90   float64
 	P99   float64
+}
+
+type measurementKey struct {
+	analysisDimensions
+	MetricPath string
+	Unit       string
+}
+
+type measurementAccumulator struct {
+	Key    measurementKey
+	Values []float64
+}
+
+type measurementRow struct {
+	measurementKey
+	Count   int64
+	Total   float64
+	Average float64
+	Minimum float64
+	Maximum float64
+}
+
+type signpostKey struct {
+	analysisDimensions
+	Category string
+	Name     string
+}
+
+type signpostAccumulator struct {
+	Key        signpostKey
+	EntryCount int64
+	TotalCount int64
+}
+
+type signpostRow struct {
+	signpostKey
+	EntryCount int64
+	TotalCount int64
+}
+
+type diagnosticStackRow struct {
+	PayloadID    string
+	AppBuild     string
+	Distribution string
+	OSVersion    string
+	DeviceClass  string
+	Type         string
+	Frames       []string
+}
+
+type parseErrorRow struct {
+	SourcePath string
+	Error      string
 }
 
 type missingSymbolRow struct {
@@ -101,6 +165,16 @@ type frameSymbolicator interface {
 		address uint64,
 		offset uint64,
 	) symbolicationResult
+}
+
+func dimensionsFor(row indexRow) analysisDimensions {
+	return analysisDimensions{
+		AppVersion:   row.AppVersion,
+		AppBuild:     row.AppBuild,
+		Distribution: row.Distribution,
+		OSVersion:    row.OSVersion,
+		DeviceClass:  row.DeviceClass,
+	}
 }
 
 func stringValue(value any) string {

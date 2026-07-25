@@ -135,14 +135,22 @@ func (a *analyzer) finalizeHistograms() []histogramRow {
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		left := strings.Join([]string{
+			rows[i].AppVersion,
 			rows[i].AppBuild,
+			rows[i].Distribution,
+			rows[i].OSVersion,
 			rows[i].DeviceClass,
 			rows[i].MetricPath,
+			rows[i].Unit,
 		}, "|")
 		right := strings.Join([]string{
+			rows[j].AppVersion,
 			rows[j].AppBuild,
+			rows[j].Distribution,
+			rows[j].OSVersion,
 			rows[j].DeviceClass,
 			rows[j].MetricPath,
+			rows[j].Unit,
 		}, "|")
 		return left < right
 	})
