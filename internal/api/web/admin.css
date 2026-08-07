@@ -533,6 +533,14 @@ code {
   transform: translateY(-1px);
 }
 
+.action-card {
+  cursor: default;
+}
+
+.action-card:hover {
+  transform: none;
+}
+
 .record-card[aria-current="true"] {
   border-color: rgba(39, 103, 231, 0.25);
   background: var(--accent-soft);

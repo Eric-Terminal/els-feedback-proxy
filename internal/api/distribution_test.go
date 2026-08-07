@@ -206,7 +206,8 @@ func TestDistributionAdminPageRequiresProtectedSession(t *testing.T) {
 	pageResponse := httptest.NewRecorder()
 	server.adminEngine.ServeHTTP(pageResponse, pageRequest)
 	if pageResponse.Code != http.StatusOK ||
-		!strings.Contains(pageResponse.Body.String(), "配置下发内容") {
+		!strings.Contains(pageResponse.Body.String(), "配置下发内容") ||
+		!strings.Contains(pageResponse.Body.String(), "Provider 数据库操作") {
 		t.Fatalf("登录后未返回官方数据页面: code=%d body=%s", pageResponse.Code, pageResponse.Body.String())
 	}
 }

@@ -460,6 +460,92 @@ paths:
           description: 官方数据已删除
         '404':
           description: 官方数据不存在
+  /v1/admin/distribution/actions:
+    get:
+      summary: 获取全部官方 Provider 操作
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '200':
+          description: Provider 操作管理记录
+    post:
+      summary: 上传官方 Provider 操作配方
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DistributionActionUpload'
+      responses:
+        '201':
+          description: Provider 操作已创建
+        '400':
+          description: 配方或合并策略无效
+  /v1/admin/distribution/actions/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema:
+          type: string
+    put:
+      summary: 更新或停用官方 Provider 操作
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DistributionActionUpdate'
+      responses:
+        '200':
+          description: Provider 操作已更新
+        '404':
+          description: Provider 操作不存在
+    delete:
+      summary: 删除官方 Provider 操作
+      servers:
+        - url: http://{host}:{port}
+          description: 独立管理监听器
+          variables:
+            host:
+              default: 127.0.0.1
+            port:
+              default: '8081'
+      security:
+        - announcementAdminToken: []
+      responses:
+        '204':
+          description: Provider 操作已删除
+        '404':
+          description: Provider 操作不存在
   /v1/telemetry:
     post:
       summary: 上传上一运行周期的 iOS 性能遥测
@@ -1182,6 +1268,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicDistributionEntry'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicDistributionAction'
     PublicDistributionEntry:
       type: object
       required: [name, path, url, file_name, sha256, size]
@@ -1226,6 +1316,106 @@ components:
         destination_path:
           type: string
           example: /Documents/Providers
+        enabled:
+          type: boolean
+        file:
+          type: string
+          format: binary
+    PublicDistributionAction:
+      type: object
+      required: [id, revision, kind, apply_on, payload_url, payload_file_name, payload_sha256, payload_size, merge_policy]
+      properties:
+        id:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum: [provider.upsert]
+        apply_on:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [initial_sync, manual_sync]
+        minimum_app_build:
+          type: integer
+          minimum: 0
+        platforms:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [ios, watchos]
+        payload_url:
+          type: string
+        payload_file_name:
+          type: string
+        payload_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        payload_size:
+          type: integer
+          format: int64
+          minimum: 1
+        merge_policy:
+          $ref: '#/components/schemas/OfficialProviderMergePolicy'
+    OfficialProviderMergePolicy:
+      type: object
+      required: [provider_fields, api_keys, header_overrides, proxy_configuration, models, if_user_deleted]
+      properties:
+        provider_fields:
+          type: string
+          enum: [update_if_unmodified, server_wins, preserve_local]
+        api_keys:
+          type: string
+          enum: [preserve_local_if_nonempty, server_wins, append_unique, update_if_unmodified]
+        header_overrides:
+          type: string
+          enum: [update_if_unmodified, server_wins, preserve_local, merge_server_wins]
+        proxy_configuration:
+          type: string
+          enum: [update_if_unmodified, server_wins, preserve_local]
+        models:
+          $ref: '#/components/schemas/OfficialProviderModelMergePolicy'
+        if_user_deleted:
+          type: string
+          enum: [keep_deleted, restore_on_manual_sync, force_restore]
+    OfficialProviderModelMergePolicy:
+      type: object
+      required: [fields, is_activated, on_missing, on_removed, user_models]
+      properties:
+        fields:
+          type: string
+          enum: [update_if_unmodified, server_wins, preserve_local]
+        is_activated:
+          type: string
+          enum: [update_if_unmodified, server_wins, preserve_local]
+        on_missing:
+          type: string
+          enum: [insert, skip]
+        on_removed:
+          type: string
+          enum: [preserve, delete_if_unmodified]
+        user_models:
+          type: string
+          enum: [preserve, delete]
+    DistributionActionUpload:
+      type: object
+      required: [enabled, file]
+      properties:
+        enabled:
+          type: boolean
+        file:
+          type: string
+          format: binary
+          description: schema_version 为 1 的 provider.upsert JSON 配方
+    DistributionActionUpdate:
+      type: object
+      required: [enabled]
+      properties:
         enabled:
           type: boolean
         file:

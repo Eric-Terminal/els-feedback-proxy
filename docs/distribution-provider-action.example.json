@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "official-provider.example",
+  "revision": 1,
+  "kind": "provider.upsert",
+  "apply_on": [
+    "initial_sync",
+    "manual_sync"
+  ],
+  "platforms": [
+    "ios",
+    "watchos"
+  ],
+  "provider": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "name": "Example Provider",
+    "baseURL": "https://api.example.com/v1",
+    "apiFormat": "openai-compatible",
+    "models": [
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "modelName": "example-chat",
+        "displayName": "Example Chat",
+        "isActivated": true
+      }
+    ]
+  },
+  "merge_policy": {
+    "provider_fields": "update_if_unmodified",
+    "api_keys": "preserve_local_if_nonempty",
+    "header_overrides": "update_if_unmodified",
+    "proxy_configuration": "preserve_local",
+    "models": {
+      "fields": "update_if_unmodified",
+      "is_activated": "preserve_local",
+      "on_missing": "insert",
+      "on_removed": "delete_if_unmodified",
+      "user_models": "preserve"
+    },
+    "if_user_deleted": "restore_on_manual_sync"
+  }
+}

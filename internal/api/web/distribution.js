@@ -2,6 +2,7 @@
 
 const state = {
   records: [],
+  actions: [],
   selectedKey: "",
   toastTimer: 0,
 };
@@ -19,6 +20,9 @@ const elements = {
   summaryTotal: document.querySelector("#summary-total"),
   summaryPublished: document.querySelector("#summary-published"),
   summarySize: document.querySelector("#summary-size"),
+  summaryActions: document.querySelector("#summary-actions"),
+  actionList: document.querySelector("#action-list"),
+  actionEmpty: document.querySelector("#action-empty"),
   name: document.querySelector("#record-name"),
   path: document.querySelector("#record-path"),
   enabled: document.querySelector("#record-enabled"),
@@ -60,8 +64,10 @@ async function request(path, options = {}) {
 async function loadRecords(preferredKey = state.selectedKey) {
   const payload = await request("/v1/admin/distribution");
   state.records = payload.records || [];
+  state.actions = payload.actions || [];
   renderSummary();
   renderList();
+  renderActions();
 
   if (preferredKey && state.records.some((record) => record.key === preferredKey)) {
     selectRecord(preferredKey);
@@ -78,6 +84,41 @@ function renderSummary() {
   elements.summaryTotal.textContent = String(state.records.length);
   elements.summaryPublished.textContent = String(published);
   elements.summarySize.textContent = formatBytes(totalBytes);
+  elements.summaryActions.textContent = String(state.actions.length);
+}
+
+function renderActions() {
+  elements.actionList.replaceChildren();
+  elements.actionEmpty.hidden = state.actions.length > 0;
+  for (const action of state.actions) {
+    const card = document.createElement("article");
+    card.className = "record-card action-card";
+
+    const header = document.createElement("span");
+    header.className = "record-card-header";
+    const title = document.createElement("strong");
+    title.textContent = action.id;
+    const revision = document.createElement("span");
+    revision.className = "record-card-id";
+    revision.textContent = `revision ${action.revision}`;
+    header.append(title, revision);
+
+    const file = document.createElement("span");
+    file.className = "record-card-file";
+    file.textContent = `${action.kind} · ${action.file_name}`;
+
+    const meta = document.createElement("span");
+    meta.className = "record-card-meta";
+    const scope = document.createElement("span");
+    scope.textContent = (action.apply_on || []).join("、");
+    const published = document.createElement("span");
+    published.className = `publish-indicator${action.enabled ? " is-published" : ""}`;
+    published.textContent = action.enabled ? "下发中" : "已停用";
+    meta.append(scope, published);
+
+    card.append(header, file, meta);
+    elements.actionList.append(card);
+  }
 }
 
 function renderList() {

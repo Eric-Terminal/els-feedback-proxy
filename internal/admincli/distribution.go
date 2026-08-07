@@ -24,6 +24,8 @@ func runDistribution(args []string, stdout, stderr io.Writer) error {
 
 	var err error
 	switch args[0] {
+	case "action":
+		err = runDistributionAction(args[1:], stdout, stderr)
 	case "list":
 		err = runDistributionList(args[1:], stdout, stderr)
 	case "upload":
@@ -226,7 +228,11 @@ func writeDistributionHelp(writer io.Writer) {
   els-feedback-proxy distribution upload --name 名称 --path /Documents/目录 --file 文件
   els-feedback-proxy distribution update --key KEY --name 名称 --path /Documents/目录 [--file 文件]
   els-feedback-proxy distribution delete --key KEY
+  els-feedback-proxy distribution action list
+  els-feedback-proxy distribution action upload --file 操作配方.json
+  els-feedback-proxy distribution action update --key KEY [--file 操作配方.json]
+  els-feedback-proxy distribution action delete --key KEY
 
-upload 和 update 可使用 --disabled 停止公开下发。
+普通文件与 action 的 upload/update 均可使用 --disabled 停止公开下发。
 环境变量与 --admin-url 用法和 announcement 命令相同。`)
 }

@@ -142,6 +142,55 @@ func TestDistributionUpdateAndDeleteUseEscapedKey(t *testing.T) {
 	}
 }
 
+func TestDistributionActionUploadUsesDedicatedAdminAPI(t *testing.T) {
+	t.Setenv("ANNOUNCEMENT_ADMIN_TOKEN", "test-admin-token")
+	filePath := filepath.Join(t.TempDir(), "provider-action.json")
+	payload := []byte(`{"schema_version":1,"id":"official-provider.cli"}`)
+	if err := os.WriteFile(filePath, payload, 0o600); err != nil {
+		t.Fatalf("写入测试操作配方失败: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/admin/distribution/actions" {
+			t.Fatalf("操作上传请求不正确: %s %s", request.Method, request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer test-admin-token" {
+			t.Fatalf("操作上传请求缺少管理鉴权")
+		}
+		reader, err := request.MultipartReader()
+		if err != nil {
+			t.Fatalf("操作上传请求不是 multipart 表单: %v", err)
+		}
+		fields := readMultipartFields(t, reader)
+		if fields["enabled"] != "false" || fields["file"] != string(payload) {
+			t.Fatalf("操作上传字段不正确: %#v", fields)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusCreated)
+		_, _ = response.Write([]byte(`{"success":true,"action":{"key":"action-key"}}`))
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	_, err := Run(
+		[]string{
+			"distribution", "action", "upload",
+			"--file", filePath,
+			"--disabled",
+			"--admin-url", server.URL,
+		},
+		strings.NewReader(""),
+		&stdout,
+		io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("上传官方数据库操作失败: %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"key": "action-key"`) {
+		t.Fatalf("操作上传输出不正确: %s", stdout.String())
+	}
+}
+
 func readMultipartFields(t *testing.T, reader *multipart.Reader) map[string]string {
 	t.Helper()
 	fields := make(map[string]string)

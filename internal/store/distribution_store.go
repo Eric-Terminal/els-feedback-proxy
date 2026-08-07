@@ -18,6 +18,7 @@ import (
 const (
 	distributionFileVersion = 1
 	maxDistributionRecords  = 200
+	maxDistributionActions  = 200
 	MaxDistributionFileSize = 32 << 20
 )
 
@@ -50,8 +51,17 @@ type DistributionUpload struct {
 }
 
 type distributionFile struct {
-	Version int                  `json:"version"`
-	Records []DistributionRecord `json:"records"`
+	Version int                        `json:"version"`
+	Records []DistributionRecord       `json:"records"`
+	Actions []OfficialDataActionRecord `json:"actions,omitempty"`
+}
+
+// PublicDistributionFile 是普通下载与数据库操作载荷共用的公开文件信息。
+type PublicDistributionFile struct {
+	FileName    string
+	ContentType string
+	SHA256      string
+	Size        int64
 }
 
 // DistributionStore 负责官方数据元信息与不可变文件内容的本地持久化。
@@ -60,6 +70,7 @@ type DistributionStore struct {
 	file    string
 	blobDir string
 	records []DistributionRecord
+	actions []OfficialDataActionRecord
 }
 
 func NewDistributionStore(dataDir string) (*DistributionStore, error) {
@@ -223,7 +234,7 @@ func (s *DistributionStore) Delete(key string) error {
 func (s *DistributionStore) PublicFile(
 	checksum string,
 	fileName string,
-) (DistributionRecord, string, bool) {
+) (PublicDistributionFile, string, bool) {
 	checksum = strings.ToLower(strings.TrimSpace(checksum))
 	fileName = strings.TrimSpace(fileName)
 
@@ -231,10 +242,25 @@ func (s *DistributionStore) PublicFile(
 	defer s.mu.RUnlock()
 	for _, record := range s.records {
 		if record.Enabled && record.SHA256 == checksum && record.FileName == fileName {
-			return record, s.blobPath(checksum), true
+			return PublicDistributionFile{
+				FileName:    record.FileName,
+				ContentType: record.ContentType,
+				SHA256:      record.SHA256,
+				Size:        record.Size,
+			}, s.blobPath(checksum), true
 		}
 	}
-	return DistributionRecord{}, "", false
+	for _, action := range s.actions {
+		if action.Enabled && action.SHA256 == checksum && action.FileName == fileName {
+			return PublicDistributionFile{
+				FileName:    action.FileName,
+				ContentType: action.ContentType,
+				SHA256:      action.SHA256,
+				Size:        action.Size,
+			}, s.blobPath(checksum), true
+		}
+	}
+	return PublicDistributionFile{}, "", false
 }
 
 func (s *DistributionStore) load() error {
@@ -242,12 +268,14 @@ func (s *DistributionStore) load() error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			s.records = []DistributionRecord{}
+			s.actions = []OfficialDataActionRecord{}
 			return nil
 		}
 		return fmt.Errorf("读取官方数据清单失败: %w", err)
 	}
 	if strings.TrimSpace(string(data)) == "" {
 		s.records = []DistributionRecord{}
+		s.actions = []OfficialDataActionRecord{}
 		return nil
 	}
 
@@ -260,6 +288,9 @@ func (s *DistributionStore) load() error {
 	}
 	if len(payload.Records) > maxDistributionRecords {
 		return fmt.Errorf("官方数据条目不能超过 %d 条", maxDistributionRecords)
+	}
+	if len(payload.Actions) > maxDistributionActions {
+		return fmt.Errorf("官方数据库操作不能超过 %d 条", maxDistributionActions)
 	}
 	for index := range payload.Records {
 		record := &payload.Records[index]
@@ -284,7 +315,43 @@ func (s *DistributionStore) load() error {
 			return fmt.Errorf("第 %d 条官方数据文件大小不一致", index+1)
 		}
 	}
+	seenActionIDs := make(map[string]struct{}, len(payload.Actions))
+	seenActionProviderIDs := make(map[string]struct{}, len(payload.Actions))
+	for index := range payload.Actions {
+		action := &payload.Actions[index]
+		if err := validateStoredOfficialDataAction(*action); err != nil {
+			return fmt.Errorf("第 %d 条官方数据库操作无效: %w", index+1, err)
+		}
+		if _, exists := seenActionIDs[action.ID]; exists {
+			return fmt.Errorf("第 %d 条官方数据库操作 ID 重复", index+1)
+		}
+		seenActionIDs[action.ID] = struct{}{}
+		providerIDKey := strings.ToLower(action.ProviderID)
+		if _, exists := seenActionProviderIDs[providerIDKey]; exists {
+			return fmt.Errorf("第 %d 条官方数据库操作的提供商重复", index+1)
+		}
+		seenActionProviderIDs[providerIDKey] = struct{}{}
+		info, err := os.Stat(s.blobPath(action.SHA256))
+		if err != nil {
+			return fmt.Errorf("第 %d 条官方数据库操作载荷不可用: %w", index+1, err)
+		}
+		if info.Size() != action.Size {
+			return fmt.Errorf("第 %d 条官方数据库操作载荷大小不一致", index+1)
+		}
+		data, err := os.ReadFile(s.blobPath(action.SHA256))
+		if err != nil {
+			return fmt.Errorf("读取第 %d 条官方数据库操作载荷失败: %w", index+1, err)
+		}
+		bundle, err := DecodeOfficialDataActionBundle(data)
+		if err != nil {
+			return fmt.Errorf("解析第 %d 条官方数据库操作载荷失败: %w", index+1, err)
+		}
+		if !officialActionRecordMatchesBundle(*action, bundle) {
+			return fmt.Errorf("第 %d 条官方数据库操作元数据与载荷不一致", index+1)
+		}
+	}
 	s.records = append([]DistributionRecord{}, payload.Records...)
+	s.actions = append([]OfficialDataActionRecord{}, payload.Actions...)
 	return nil
 }
 
@@ -292,6 +359,7 @@ func (s *DistributionStore) saveLocked() error {
 	payload := distributionFile{
 		Version: distributionFileVersion,
 		Records: s.records,
+		Actions: s.actions,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -367,6 +435,11 @@ func (s *DistributionStore) writeBlobLocked(checksum string, data []byte) error 
 func (s *DistributionStore) removeBlobIfUnusedLocked(checksum string) {
 	for _, record := range s.records {
 		if record.SHA256 == checksum {
+			return
+		}
+	}
+	for _, action := range s.actions {
+		if action.SHA256 == checksum {
 			return
 		}
 	}

@@ -165,6 +165,22 @@
           </form>
         </section>
       </section>
+
+      <section class="panel" aria-labelledby="action-list-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">数据库配方</p>
+            <h2 id="action-list-title">Provider 数据库操作</h2>
+          </div>
+          <span class="save-state"><strong id="summary-actions">0</strong> 条 · distribution action --help</span>
+        </div>
+        <p>这里展示客户端确认后可执行的 Provider 操作。创建、替换、启停和删除请使用管理 CLI 或 API。</p>
+        <div id="action-list" class="record-list" aria-live="polite"></div>
+        <div id="action-empty" class="empty-state" hidden>
+          <h3>还没有 Provider 操作</h3>
+          <p>普通文件下发不受影响。</p>
+        </div>
+      </section>
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

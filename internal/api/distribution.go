@@ -18,8 +18,9 @@ import (
 const distributionMultipartOverhead = 1 << 20
 
 type publicDistributionManifest struct {
-	Version   int                       `json:"version"`
-	Downloads []publicDistributionEntry `json:"downloads"`
+	Version   int                        `json:"version"`
+	Downloads []publicDistributionEntry  `json:"downloads"`
+	Actions   []publicDistributionAction `json:"actions,omitempty"`
 }
 
 type publicDistributionEntry struct {
@@ -29,6 +30,20 @@ type publicDistributionEntry struct {
 	FileName string `json:"file_name"`
 	SHA256   string `json:"sha256"`
 	Size     int64  `json:"size"`
+}
+
+type publicDistributionAction struct {
+	ID              string                            `json:"id"`
+	Revision        int                               `json:"revision"`
+	Kind            string                            `json:"kind"`
+	ApplyOn         []string                          `json:"apply_on"`
+	MinimumAppBuild *int                              `json:"minimum_app_build,omitempty"`
+	Platforms       []string                          `json:"platforms,omitempty"`
+	PayloadURL      string                            `json:"payload_url"`
+	PayloadFileName string                            `json:"payload_file_name"`
+	PayloadSHA256   string                            `json:"payload_sha256"`
+	PayloadSize     int64                             `json:"payload_size"`
+	MergePolicy     store.OfficialProviderMergePolicy `json:"merge_policy"`
 }
 
 func (s *Server) registerDistributionRoutes() {
@@ -44,6 +59,10 @@ func (s *Server) registerDistributionAdminRoutes() {
 	adminAPI.Use(s.requireAdmin)
 	adminAPI.GET("", s.handleAdminListDistribution)
 	adminAPI.POST("", s.handleAdminCreateDistribution)
+	adminAPI.GET("/actions", s.handleAdminListDistributionActions)
+	adminAPI.POST("/actions", s.handleAdminCreateDistributionAction)
+	adminAPI.PUT("/actions/:key", s.handleAdminUpdateDistributionAction)
+	adminAPI.DELETE("/actions/:key", s.handleAdminDeleteDistributionAction)
 	adminAPI.PUT("/:key", s.handleAdminUpdateDistribution)
 	adminAPI.DELETE("/:key", s.handleAdminDeleteDistribution)
 }
@@ -65,10 +84,32 @@ func (s *Server) handleDistributionManifest(c *gin.Context) {
 			Size:     record.Size,
 		})
 	}
+	actionRecords := s.distribution.PublicActions()
+	actions := make([]publicDistributionAction, 0, len(actionRecords))
+	for _, action := range actionRecords {
+		actions = append(actions, publicDistributionAction{
+			ID:              action.ID,
+			Revision:        action.Revision,
+			Kind:            action.Kind,
+			ApplyOn:         action.ApplyOn,
+			MinimumAppBuild: action.MinimumAppBuild,
+			Platforms:       action.Platforms,
+			PayloadURL: fmt.Sprintf(
+				"/v1/distribution/files/%s/%s",
+				action.SHA256,
+				url.PathEscape(action.FileName),
+			),
+			PayloadFileName: action.FileName,
+			PayloadSHA256:   action.SHA256,
+			PayloadSize:     action.Size,
+			MergePolicy:     action.MergePolicy,
+		})
+	}
 
 	payload, err := json.Marshal(publicDistributionManifest{
 		Version:   1,
 		Downloads: downloads,
+		Actions:   actions,
 	})
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "编码官方数据清单失败")
@@ -119,7 +160,61 @@ func (s *Server) handleAdminListDistribution(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"records": s.distribution.List(),
+		"actions": s.distribution.ListActions(),
 	})
+}
+
+func (s *Server) handleAdminListDistributionActions(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"actions": s.distribution.ListActions(),
+	})
+}
+
+func (s *Server) handleAdminCreateDistributionAction(c *gin.Context) {
+	input, upload, cleanup, err := decodeDistributionActionMultipart(c, true)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	created, err := s.distribution.CreateAction(input, *upload)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, gin.H{"success": true, "action": created})
+}
+
+func (s *Server) handleAdminUpdateDistributionAction(c *gin.Context) {
+	input, upload, cleanup, err := decodeDistributionActionMultipart(c, false)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, err := s.distribution.UpdateAction(c.Param("key"), input, upload)
+	if err != nil {
+		writeDistributionStoreError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"success": true, "action": updated})
+}
+
+func (s *Server) handleAdminDeleteDistributionAction(c *gin.Context) {
+	if err := s.distribution.DeleteAction(c.Param("key")); err != nil {
+		writeDistributionStoreError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminCreateDistribution(c *gin.Context) {
@@ -234,6 +329,57 @@ func decodeDistributionMultipart(
 	return input, &store.DistributionUpload{
 		FileName:    files[0].Filename,
 		ContentType: contentType,
+		Data:        data,
+	}, cleanup, nil
+}
+
+func decodeDistributionActionMultipart(
+	c *gin.Context,
+	fileRequired bool,
+) (store.OfficialDataActionInput, *store.DistributionUpload, func(), error) {
+	c.Request.Body = http.MaxBytesReader(
+		c.Writer,
+		c.Request.Body,
+		store.MaxDistributionFileSize+distributionMultipartOverhead,
+	)
+	if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
+		return store.OfficialDataActionInput{}, nil, nil, fmt.Errorf("解析上传表单失败: %w", err)
+	}
+	cleanup := func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(c.Request.FormValue("enabled")))
+	if err != nil {
+		return store.OfficialDataActionInput{}, nil, cleanup, fmt.Errorf("发布状态无效")
+	}
+	input := store.OfficialDataActionInput{Enabled: enabled}
+	files := c.Request.MultipartForm.File["file"]
+	if len(files) == 0 {
+		if fileRequired {
+			return store.OfficialDataActionInput{}, nil, cleanup, fmt.Errorf("必须选择操作载荷文件")
+		}
+		return input, nil, cleanup, nil
+	}
+	if len(files) != 1 {
+		return store.OfficialDataActionInput{}, nil, cleanup, fmt.Errorf("每次只能上传一个操作载荷文件")
+	}
+	file, err := files[0].Open()
+	if err != nil {
+		return store.OfficialDataActionInput{}, nil, cleanup, fmt.Errorf("打开操作载荷失败: %w", err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, store.MaxDistributionFileSize+1))
+	if err != nil {
+		return store.OfficialDataActionInput{}, nil, cleanup, fmt.Errorf("读取操作载荷失败: %w", err)
+	}
+	if len(data) > store.MaxDistributionFileSize {
+		return store.OfficialDataActionInput{}, nil, cleanup, fmt.Errorf("操作载荷不能超过 32 MiB")
+	}
+	return input, &store.DistributionUpload{
+		FileName:    files[0].Filename,
+		ContentType: "application/json",
 		Data:        data,
 	}, cleanup, nil
 }

@@ -8,6 +8,7 @@
 - `POST /v1/surveys/:key/responses`：通过一次性 challenge、HMAC 与 PoW 保存匿名答卷
 - `GET /v1/distribution/manifest`：返回客户端官方数据清单，支持 ETag 与 Cloudflare 边缘缓存
 - `GET /v1/distribution/files/<sha256>/<文件名>`：下载内容寻址的不可变官方文件
+- 官方数据清单也可下发 `provider.upsert` 配方，由客户端先预览再按合并策略写入 Provider 数据库
 - `GET /v1/updates/timeline`：使用服务端 GitHub 凭据读取 `dev` 分支提交与 CI 状态，并通过内存、ETag 和 Cloudflare 共享缓存
 - `POST /v1/telemetry`：接收 iOS MetricKit 指标与诊断；不使用 PoW，不持久化来源 IP
 - `GET /v1/admin/telemetry/status`：仅由管理监听器提供的遥测临时存储统计
@@ -169,6 +170,10 @@ CLI 通过独立管理监听器调用与 WebUI 相同的管理 API，不会直�
 ./els-feedback-proxy distribution upload --name <名称> --path /Documents/<目录> --file <本地文件>
 ./els-feedback-proxy distribution update --key <数据-key> --name <名称> --path /Documents/<目录> [--file <替换文件>]
 ./els-feedback-proxy distribution delete --key <数据-key>
+./els-feedback-proxy distribution action list
+./els-feedback-proxy distribution action upload --file docs/distribution-provider-action.example.json
+./els-feedback-proxy distribution action update --key <操作-key> [--file <新配方.json>]
+./els-feedback-proxy distribution action delete --key <操作-key>
 
 ./els-feedback-proxy telemetry status
 ./els-feedback-proxy telemetry manifest
@@ -182,7 +187,18 @@ printf '%s' '{"payload_ids":["<SHA-256>"]}' | ./els-feedback-proxy telemetry con
 ELS_ADMIN_URL=http://192.168.31.102:8521 ./els-feedback-proxy announcement list
 ```
 
-公告与意见征集的 `create`、`update` 支持用 `--file -` 从标准输入读取 JSON。官方数据 `upload` 和 `update` 可加 `--disabled` 暂停公开下发。所有成功响应均输出格式化 JSON，方便人工查看或继续交给其他命令处理。完整用法可通过对应命令的 `--help` 查看。
+公告与意见征集的 `create`、`update` 支持用 `--file -` 从标准输入读取 JSON。官方文件与 Provider 操作的 `upload`、`update` 可加 `--disabled` 暂停公开下发。Provider 操作只描述受支持字段的合并方式，不接受任意 SQL；客户端会在手动同步前显示将下载的文件和将修改的提供商。所有成功响应均输出格式化 JSON，方便人工查看或继续交给其他命令处理。完整用法可通过对应命令的 `--help` 查看。
+
+Provider 操作配方可从 [`docs/distribution-provider-action.example.json`](docs/distribution-provider-action.example.json) 复制后修改。发布时应保持 Provider 和模型 UUID 稳定；每次改变同一操作的内容都必须递增 `revision`。合并策略支持以下值：
+
+- `provider_fields`、`proxy_configuration`、`models.fields`、`models.is_activated`：`update_if_unmodified`、`server_wins`、`preserve_local`
+- `api_keys`：`preserve_local_if_nonempty`、`server_wins`、`append_unique`、`update_if_unmodified`
+- `header_overrides`：`update_if_unmodified`、`server_wins`、`preserve_local`、`merge_server_wins`
+- `models.on_missing`：`insert`、`skip`；`models.on_removed`：`preserve`、`delete_if_unmodified`
+- `models.user_models`：`preserve`、`delete`
+- `if_user_deleted`：`keep_deleted`、`restore_on_manual_sync`、`force_restore`
+
+通常使用示例中的保守策略：官方未被用户修改的字段随版本更新，本机 API Key、代理、模型启用状态和用户自建模型保持不变。服务端在上传时会校验配方结构、HTTPS 地址、UUID、策略值及同一操作的 revision 单调性。
 
 遥测 `export` 会逐字节输出原始 JSON，不做格式化。只有接收端已经核对清单中的
 `size_bytes`、`file_sha256` 且确认文件是有效 JSON 后，才可调用 `confirm`。
