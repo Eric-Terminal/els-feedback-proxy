@@ -199,7 +199,7 @@ func (s *Store) Status() Status {
 	defer s.mu.RUnlock()
 
 	status := Status{
-		SchemaVersion:      SchemaVersion,
+		SchemaVersion:      AdminSchemaVersion,
 		GeneratedAt:        s.now().UTC(),
 		RetentionDays:      int(s.retention / (24 * time.Hour)),
 		MaxTotalBytes:      s.maxTotalSize,
@@ -536,7 +536,7 @@ func (s *Store) reconcileLocked() error {
 
 func (s *Store) manifestLocked() Manifest {
 	return Manifest{
-		SchemaVersion: SchemaVersion,
+		SchemaVersion: AdminSchemaVersion,
 		GeneratedAt:   s.now().UTC(),
 		Entries:       s.sortedEntriesLocked(),
 	}

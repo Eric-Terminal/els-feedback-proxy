@@ -103,7 +103,7 @@ func (s *Server) handleTelemetryUpload(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, telemetry.UploadResponse{
-		SchemaVersion: telemetry.SchemaVersion,
+		SchemaVersion: envelopes[0].Envelope.SchemaVersion,
 		Results:       results,
 	})
 }

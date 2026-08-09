@@ -15,7 +15,7 @@ func makeEnvelope(kind: String, payload: [String: Any]) throws -> [String: Any] 
         .joined()
 
     return [
-        "schema_version": 1,
+        "schema_version": 2,
         "payload_id": payloadID,
         "kind": kind,
         "captured_at": formatter.string(from: now),
@@ -44,6 +44,11 @@ func makeEnvelope(kind: String, payload: [String: Any]) throws -> [String: Any] 
 }
 
 let metricPayload: [String: Any] = [
+    "_etos": [
+        "format": "metric-kit-flat-v1",
+        "call_stack_frames_emitted": 0,
+        "truncated": false
+    ],
     "signpostMetrics": [
         [
             "signpostCategory": "Network",
@@ -62,16 +67,25 @@ let metricPayload: [String: Any] = [
     ]
 ]
 let diagnosticPayload: [String: Any] = [
+    "_etos": [
+        "format": "metric-kit-flat-v1",
+        "call_stack_frames_emitted": 1,
+        "truncated": false
+    ],
     "hangDiagnostics": [
         [
             "hangDuration": ["value": 2, "unit": "s"],
             "callStackTree": [
+                "format": "flat-v1",
                 "callStackPerThread": true,
+                "truncated": false,
                 "callStacks": [
                     [
                         "threadAttributed": true,
-                        "callStackRootFrames": [
+                        "callStackFrames": [
                             [
+                                "frameID": 0,
+                                "depth": 0,
                                 "binaryName": "ETOS LLM Studio",
                                 "binaryUUID": "70B89F27-1634-3580-A695-57CDB41D7743",
                                 "address": 4_294_971_392,
@@ -87,7 +101,7 @@ let diagnosticPayload: [String: Any] = [
 ]
 
 let request: [String: Any] = [
-    "schema_version": 1,
+    "schema_version": 2,
     "envelopes": [
         try makeEnvelope(kind: "metric", payload: metricPayload),
         try makeEnvelope(kind: "diagnostic", payload: diagnosticPayload)

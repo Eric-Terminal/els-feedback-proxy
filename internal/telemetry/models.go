@@ -14,10 +14,13 @@ import (
 )
 
 const (
-	SchemaVersion       = 1
-	MaxBatchEnvelopes   = 16
-	MaxRequestBodyBytes = 4 << 20
-	MaxEnvelopeBytes    = 3 << 20
+	LegacySchemaVersion  = 1
+	CurrentSchemaVersion = 2
+	AdminSchemaVersion   = 1
+	MaxBatchEnvelopes    = 16
+	MaxRequestBodyBytes  = 4 << 20
+	MaxEnvelopeBytes     = 3 << 20
+	MaxJSONNestingDepth  = 512
 )
 
 var (
@@ -95,11 +98,14 @@ type UploadResponse struct {
 }
 
 func DecodeUploadRequest(body []byte, now time.Time) ([]ValidatedEnvelope, error) {
+	if maximumJSONNestingDepth(body) > MaxJSONNestingDepth {
+		return nil, fmt.Errorf("请求体 JSON 嵌套超过 %d 层", MaxJSONNestingDepth)
+	}
 	var request uploadRequest
 	if err := decodeStrict(body, &request); err != nil {
 		return nil, fmt.Errorf("请求体不是有效的遥测批次: %w", err)
 	}
-	if request.SchemaVersion != SchemaVersion {
+	if !isSupportedSchemaVersion(request.SchemaVersion) {
 		return nil, fmt.Errorf("不支持的 schema_version: %d", request.SchemaVersion)
 	}
 	if len(request.Envelopes) == 0 || len(request.Envelopes) > MaxBatchEnvelopes {
@@ -118,6 +124,12 @@ func DecodeUploadRequest(body []byte, now time.Time) ([]ValidatedEnvelope, error
 		if err := envelope.Validate(now); err != nil {
 			return nil, fmt.Errorf("第 %d 条遥测无效: %w", index+1, err)
 		}
+		if envelope.SchemaVersion != request.SchemaVersion {
+			return nil, fmt.Errorf(
+				"第 %d 条遥测 schema_version 与批次不一致",
+				index+1,
+			)
+		}
 
 		result = append(result, ValidatedEnvelope{
 			Envelope: envelope,
@@ -128,7 +140,7 @@ func DecodeUploadRequest(body []byte, now time.Time) ([]ValidatedEnvelope, error
 }
 
 func (e Envelope) Validate(now time.Time) error {
-	if e.SchemaVersion != SchemaVersion {
+	if !isSupportedSchemaVersion(e.SchemaVersion) {
 		return fmt.Errorf("不支持的 schema_version: %d", e.SchemaVersion)
 	}
 	if !lowerHexSHA256.MatchString(e.PayloadID) {
@@ -183,6 +195,11 @@ func (e Envelope) Validate(now time.Time) error {
 	if err := json.Unmarshal(trimmedPayload, &payload); err != nil || payload == nil {
 		return errors.New("payload 必须是有效 JSON 对象")
 	}
+	if e.SchemaVersion == CurrentSchemaVersion {
+		if err := validateFlatPayloadMetadata(payload); err != nil {
+			return err
+		}
+	}
 
 	// Swift 在上传前已按键排序并压缩 payload。直接校验收到的原始片段，
 	// 避免 Go 在 Compact 时转义 HTML 字符或重新编码浮点数而改变跨语言哈希。
@@ -191,6 +208,60 @@ func (e Envelope) Validate(now time.Time) error {
 		return errors.New("payload_id 与 payload 内容不匹配")
 	}
 	return nil
+}
+
+func isSupportedSchemaVersion(version int) bool {
+	return version == LegacySchemaVersion || version == CurrentSchemaVersion
+}
+
+func validateFlatPayloadMetadata(payload map[string]json.RawMessage) error {
+	rawMetadata, exists := payload["_etos"]
+	if !exists {
+		return errors.New("schema_version 2 payload 缺少 _etos 格式声明")
+	}
+	var metadata struct {
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(rawMetadata, &metadata); err != nil ||
+		metadata.Format != "metric-kit-flat-v1" {
+		return errors.New("schema_version 2 payload 格式无效")
+	}
+	return nil
+}
+
+func maximumJSONNestingDepth(data []byte) int {
+	depth := 0
+	maximumDepth := 0
+	insideString := false
+	escaping := false
+
+	for _, value := range data {
+		if insideString {
+			if escaping {
+				escaping = false
+			} else if value == '\\' {
+				escaping = true
+			} else if value == '"' {
+				insideString = false
+			}
+			continue
+		}
+
+		switch value {
+		case '"':
+			insideString = true
+		case '{', '[':
+			depth++
+			if depth > maximumDepth {
+				maximumDepth = depth
+			}
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return maximumDepth
 }
 
 func decodeStrict(data []byte, target any) error {

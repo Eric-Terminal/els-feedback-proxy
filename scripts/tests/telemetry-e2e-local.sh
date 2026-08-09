@@ -30,9 +30,13 @@ cd "$repo_root"
 go build -o "$binary" ./cmd/server
 xcrun swift "$repo_root/scripts/testdata/generate-swift-telemetry-fixture.swift" > "$request_body"
 jq -e '
-  .schema_version == 1 and
+  .schema_version == 2 and
   (.envelopes | length) == 2 and
-  all(.envelopes[]; .privacy.contains_chat_content == false)
+  all(.envelopes[];
+    .schema_version == 2 and
+    .privacy.contains_chat_content == false and
+    .payload._etos.format == "metric-kit-flat-v1"
+  )
 ' "$request_body" >/dev/null
 
 env \
@@ -64,6 +68,7 @@ curl -fsS \
   --data-binary "@$request_body" \
   "http://127.0.0.1:$public_port/v1/telemetry" > "$first_response"
 jq -e '
+  .schema_version == 2 and
   (.results | length) == 2 and
   all(.results[]; .status == "accepted")
 ' "$first_response" >/dev/null
@@ -74,6 +79,7 @@ curl -fsS \
   --data-binary "@$request_body" \
   "http://127.0.0.1:$public_port/v1/telemetry" > "$second_response"
 jq -e '
+  .schema_version == 2 and
   (.results | length) == 2 and
   all(.results[]; .status == "duplicate")
 ' "$second_response" >/dev/null

@@ -27,7 +27,8 @@ func TestTelemetryUploadAcceptsAndPersistentlyDeduplicates(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &first); err != nil {
 		t.Fatalf("解析首次响应失败: %v", err)
 	}
-	if len(first.Results) != 1 || first.Results[0].Status != "accepted" {
+	if first.SchemaVersion != telemetry.CurrentSchemaVersion ||
+		len(first.Results) != 1 || first.Results[0].Status != "accepted" {
 		t.Fatalf("首次上传状态应为 accepted: %+v", first.Results)
 	}
 
@@ -43,6 +44,27 @@ func TestTelemetryUploadAcceptsAndPersistentlyDeduplicates(t *testing.T) {
 	if len(store.Manifest().Entries) != 1 ||
 		store.Manifest().Entries[0].PayloadID != payloadID {
 		t.Fatalf("重复上传不应产生第二个文件")
+	}
+}
+
+func TestTelemetryUploadEchoesLegacySchemaVersion(t *testing.T) {
+	server, _ := newTelemetryTestServer(t)
+	body, _ := telemetryTestBodyForSchema(
+		t,
+		telemetry.LegacySchemaVersion,
+		`{"cpu":1}`,
+	)
+	response := performTelemetryUpload(server, body, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("v1 旧客户端上传应继续成功，实际 %d: %s", response.Code, response.Body.String())
+	}
+	var decoded telemetry.UploadResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("解析 v1 上传响应失败: %v", err)
+	}
+	if decoded.SchemaVersion != telemetry.LegacySchemaVersion ||
+		len(decoded.Results) != 1 || decoded.Results[0].Status != "accepted" {
+		t.Fatalf("v1 响应必须回显请求版本: %+v", decoded)
 	}
 }
 
@@ -185,12 +207,36 @@ func newTelemetryTestServer(t *testing.T) (*Server, *telemetry.Store) {
 }
 
 func telemetryTestBody(t *testing.T, rawPayload string) ([]byte, string) {
+	return telemetryTestBodyForSchema(t, telemetry.CurrentSchemaVersion, rawPayload)
+}
+
+func telemetryTestBodyForSchema(
+	t *testing.T,
+	schemaVersion int,
+	rawPayload string,
+) ([]byte, string) {
 	t.Helper()
 	payload := []byte(rawPayload)
+	if schemaVersion == telemetry.CurrentSchemaVersion {
+		var payloadObject map[string]any
+		if err := json.Unmarshal(payload, &payloadObject); err != nil {
+			t.Fatalf("解析遥测测试 payload 失败: %v", err)
+		}
+		payloadObject["_etos"] = map[string]any{
+			"call_stack_frames_emitted": 0,
+			"format":                    "metric-kit-flat-v1",
+			"truncated":                 false,
+		}
+		var err error
+		payload, err = json.Marshal(payloadObject)
+		if err != nil {
+			t.Fatalf("编码 v2 遥测测试 payload 失败: %v", err)
+		}
+	}
 	sum := sha256.Sum256(payload)
 	payloadID := hex.EncodeToString(sum[:])
 	envelope := telemetry.Envelope{
-		SchemaVersion: telemetry.SchemaVersion,
+		SchemaVersion: schemaVersion,
 		PayloadID:     payloadID,
 		Kind:          telemetry.PayloadKindMetric,
 		CapturedAt:    time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC),
@@ -212,7 +258,7 @@ func telemetryTestBody(t *testing.T, rawPayload string) ([]byte, string) {
 		SchemaVersion int                  `json:"schema_version"`
 		Envelopes     []telemetry.Envelope `json:"envelopes"`
 	}{
-		SchemaVersion: telemetry.SchemaVersion,
+		SchemaVersion: schemaVersion,
 		Envelopes:     []telemetry.Envelope{envelope},
 	})
 	if err != nil {

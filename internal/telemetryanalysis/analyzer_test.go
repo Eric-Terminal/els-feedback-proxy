@@ -274,7 +274,7 @@ func TestAnalyzerKeepsReleaseDimensionsSeparate(t *testing.T) {
 
 func testEnvelopeFixture() map[string]any {
 	return map[string]any{
-		"schema_version": 1,
+		"schema_version": 2,
 		"payload_id":     strings.Repeat("a", 64),
 		"kind":           "diagnostic",
 		"captured_at":    "2026-07-26T12:00:00Z",
@@ -299,6 +299,11 @@ func testEnvelopeFixture() map[string]any {
 			"contains_user_identifier": false,
 		},
 		"payload": map[string]any{
+			"_etos": map[string]any{
+				"format":                    "metric-kit-flat-v1",
+				"call_stack_frames_emitted": 1,
+				"truncated":                 false,
+			},
 			"futureMetricKitField": map[string]any{
 				"sample": 1,
 			},
@@ -309,11 +314,15 @@ func testEnvelopeFixture() map[string]any {
 				map[string]any{
 					"hangDuration": map[string]any{"value": 2, "unit": "s"},
 					"callStackTree": map[string]any{
+						"format":    "flat-v1",
+						"truncated": false,
 						"callStacks": []any{
 							map[string]any{
 								"threadAttributed": true,
-								"callStackRootFrames": []any{
+								"callStackFrames": []any{
 									map[string]any{
+										"frameID":                     0,
+										"depth":                       0,
 										"binaryName":                  "ETOS LLM Studio",
 										"binaryUUID":                  testUUID,
 										"address":                     4_294_971_392,

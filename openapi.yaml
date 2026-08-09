@@ -887,7 +887,8 @@ components:
       properties:
         schema_version:
           type: integer
-          enum: [1]
+          enum: [1, 2]
+          description: 必须与批次内所有 envelope 的 schema_version 一致；v1 仅用于兼容已发布客户端，v2 为当前扁平调用栈格式。
         envelopes:
           type: array
           minItems: 1
@@ -900,7 +901,8 @@ components:
       properties:
         schema_version:
           type: integer
-          enum: [1]
+          enum: [1, 2]
+          description: 回显请求使用的 schema_version，确保旧客户端仍能解码响应。
         results:
           type: array
           items:
@@ -928,10 +930,10 @@ components:
       properties:
         schema_version:
           type: integer
-          enum: [1]
+          enum: [1, 2]
         payload_id:
           type: string
-          description: 规范化原始 payload JSON 的 SHA-256。
+          description: 规范化后的 payload JSON 的 SHA-256；v2 对压平后的 payload 计算。
           pattern: '^[a-f0-9]{64}$'
         kind:
           type: string
@@ -998,7 +1000,7 @@ components:
               enum: [false]
         payload:
           type: object
-          description: Apple MetricKit 产生的原始 JSON 对象，未知字段原样保留。
+          description: v1 为 Apple MetricKit 原始 JSON；v2 要求 `_etos.format` 为 `metric-kit-flat-v1`，并将每个 `callStackTree` 的递归帧转换为带 `frameID`、`parentFrameID` 与 `depth` 的 `callStackFrames` 数组。未知 MetricKit 字段继续保留。
           additionalProperties: true
     TelemetryManifest:
       type: object

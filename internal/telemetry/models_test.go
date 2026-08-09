@@ -32,6 +32,84 @@ func TestDecodeUploadRequestAcceptsSwiftCompatibleEnvelope(t *testing.T) {
 	}
 }
 
+func TestDecodeUploadRequestAcceptsFlatV2AndLegacyV1(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	flatPayload := []byte(`{"_etos":{"call_stack_frames_emitted":1,"format":"metric-kit-flat-v1","truncated":false},"hangDiagnostics":[{"callStackTree":{"callStacks":[{"callStackFrames":[{"binaryName":"ETOS LLM Studio","depth":0,"frameID":0}]}],"format":"flat-v1","truncated":false}}]}`)
+	flatEnvelope := makeEnvelopeRawForSchema(
+		t,
+		CurrentSchemaVersion,
+		PayloadKindDiagnostic,
+		flatPayload,
+		now,
+	)
+	flatItems, err := DecodeUploadRequest(
+		makeUploadBodyForSchema(t, CurrentSchemaVersion, flatEnvelope),
+		now,
+	)
+	if err != nil || len(flatItems) != 1 {
+		t.Fatalf("v2 扁平遥测应通过校验: items=%d err=%v", len(flatItems), err)
+	}
+
+	legacyPayload := []byte(`{"hang":1}`)
+	legacyEnvelope := makeEnvelopeRawForSchema(
+		t,
+		LegacySchemaVersion,
+		PayloadKindDiagnostic,
+		legacyPayload,
+		now,
+	)
+	legacyItems, err := DecodeUploadRequest(
+		makeUploadBodyForSchema(t, LegacySchemaVersion, legacyEnvelope),
+		now,
+	)
+	if err != nil || len(legacyItems) != 1 {
+		t.Fatalf("v1 旧遥测应继续通过校验: items=%d err=%v", len(legacyItems), err)
+	}
+}
+
+func TestDecodeUploadRequestRejectsInvalidV2FormatAndMixedVersions(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	missingMetadata := makeEnvelopeRawForSchema(
+		t,
+		CurrentSchemaVersion,
+		PayloadKindMetric,
+		[]byte(`{"cpu":1}`),
+		now,
+	)
+	if _, err := DecodeUploadRequest(
+		makeUploadBodyForSchema(t, CurrentSchemaVersion, missingMetadata),
+		now,
+	); err == nil || !strings.Contains(err.Error(), "_etos") {
+		t.Fatalf("缺少扁平格式声明的 v2 遥测应被拒绝，实际错误: %v", err)
+	}
+
+	legacyEnvelope := makeEnvelopeRawForSchema(
+		t,
+		LegacySchemaVersion,
+		PayloadKindMetric,
+		[]byte(`{"cpu":1}`),
+		now,
+	)
+	if _, err := DecodeUploadRequest(
+		makeUploadBodyForSchema(t, CurrentSchemaVersion, legacyEnvelope),
+		now,
+	); err == nil || !strings.Contains(err.Error(), "批次不一致") {
+		t.Fatalf("批次与信封版本不一致时应被拒绝，实际错误: %v", err)
+	}
+}
+
+func TestDecodeUploadRequestRejectsExcessiveJSONNesting(t *testing.T) {
+	nested := `0`
+	for range MaxJSONNestingDepth + 1 {
+		nested = `[` + nested + `]`
+	}
+	body := []byte(`{"schema_version":1,"envelopes":` + nested + `}`)
+	if _, err := DecodeUploadRequest(body, time.Now().UTC()); err == nil ||
+		!strings.Contains(err.Error(), "嵌套") {
+		t.Fatalf("过深 JSON 应在解码前被拒绝，实际错误: %v", err)
+	}
+}
+
 func TestDecodeUploadRequestRejectsUnknownAndUnsafeFields(t *testing.T) {
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	raw := makeEnvelopeRaw(t, PayloadKindDiagnostic, []byte(`{"hang":1}`), now)
@@ -87,7 +165,7 @@ func TestDecodeUploadRequestEnforcesBatchCount(t *testing.T) {
 	body, err := json.Marshal(struct {
 		SchemaVersion int               `json:"schema_version"`
 		Envelopes     []json.RawMessage `json:"envelopes"`
-	}{SchemaVersion: SchemaVersion, Envelopes: items})
+	}{SchemaVersion: LegacySchemaVersion, Envelopes: items})
 	if err != nil {
 		t.Fatalf("编码超限批次失败: %v", err)
 	}
@@ -97,6 +175,14 @@ func TestDecodeUploadRequestEnforcesBatchCount(t *testing.T) {
 }
 
 func makeUploadBody(t *testing.T, envelopes ...[]byte) []byte {
+	return makeUploadBodyForSchema(t, LegacySchemaVersion, envelopes...)
+}
+
+func makeUploadBodyForSchema(
+	t *testing.T,
+	schemaVersion int,
+	envelopes ...[]byte,
+) []byte {
 	t.Helper()
 	rawEnvelopes := make([]json.RawMessage, len(envelopes))
 	for index, envelope := range envelopes {
@@ -109,7 +195,7 @@ func makeUploadBody(t *testing.T, envelopes ...[]byte) []byte {
 		SchemaVersion int               `json:"schema_version"`
 		Envelopes     []json.RawMessage `json:"envelopes"`
 	}{
-		SchemaVersion: SchemaVersion,
+		SchemaVersion: schemaVersion,
 		Envelopes:     rawEnvelopes,
 	})
 	if err != nil {
@@ -124,10 +210,26 @@ func makeEnvelopeRaw(
 	payload []byte,
 	capturedAt time.Time,
 ) []byte {
+	return makeEnvelopeRawForSchema(
+		t,
+		LegacySchemaVersion,
+		kind,
+		payload,
+		capturedAt,
+	)
+}
+
+func makeEnvelopeRawForSchema(
+	t *testing.T,
+	schemaVersion int,
+	kind PayloadKind,
+	payload []byte,
+	capturedAt time.Time,
+) []byte {
 	t.Helper()
 	sum := sha256.Sum256(payload)
 	envelope := Envelope{
-		SchemaVersion: SchemaVersion,
+		SchemaVersion: schemaVersion,
 		PayloadID:     hex.EncodeToString(sum[:]),
 		Kind:          kind,
 		CapturedAt:    capturedAt.UTC(),

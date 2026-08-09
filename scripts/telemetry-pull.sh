@@ -107,7 +107,7 @@ verify_telemetry_file() {
     fail "文件 SHA-256 不一致: $payload_id" ||
     return 1
   jq -e --arg payload_id "$payload_id" '
-    .schema_version == 1 and
+    (.schema_version == 1 or .schema_version == 2) and
     .payload_id == $payload_id and
     (.kind == "metric" or .kind == "diagnostic") and
     (.payload | type == "object") and

@@ -8,6 +8,7 @@ import (
 // recognizedPayloadFields 是当前分析器已理解的 MetricKit 顶层类别。
 // 新系统字段仍会保留在原始 JSON，并进入 unknown-fields.csv 提醒更新分析器。
 var recognizedPayloadFields = map[string]struct{}{
+	"_etos":                               {},
 	"animationMetrics":                    {},
 	"appLaunchDiagnostics":                {},
 	"applicationExitMetrics":              {},

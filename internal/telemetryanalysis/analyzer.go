@@ -163,7 +163,8 @@ func (a *analyzer) processFile(path, symbolicatedRoot string) error {
 	if err := decoder.Decode(&root); err != nil {
 		return &inputFileError{err: fmt.Errorf("原始文件不是有效 JSON: %w", err)}
 	}
-	if stringValue(root["schema_version"]) != "1" {
+	schemaVersion := stringValue(root["schema_version"])
+	if schemaVersion != "1" && schemaVersion != "2" {
 		return &inputFileError{err: errors.New("不支持的 envelope schema_version")}
 	}
 	payload, ok := root["payload"].(map[string]any)
