@@ -54,6 +54,74 @@ paths:
           description: 时间线内容未变化
         '502':
           description: GitHub 暂时不可用且服务端没有旧缓存
+  /v1/guide/token:
+    post:
+      summary: 获取内置向导临时令牌
+      description: 令牌按来源 IP 与当前 30 秒时间窗绑定，不使用 PoW 或设备证明。
+      responses:
+        '200':
+          description: 当前时间窗令牌
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuideToken'
+  /v1/chat/completions:
+    post:
+      summary: 使用内置免费向导模型
+      description: OpenAI Chat Completions 兼容的流式接口。客户端 model 与 system/developer 消息会被忽略，服务端固定模型并重建向导提示词。
+      security:
+        - guideToken: []
+      parameters:
+        - in: header
+          name: X-Guide-Session-ID
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuideChatCompletionRequest'
+      responses:
+        '200':
+          description: 标准 Chat Completions SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          description: 请求结构或会话 ID 无效
+        '401':
+          description: 临时令牌无效或过期
+        '429':
+          description: 同 IP 或同会话已有向导请求生成中
+        '502':
+          description: 固定上游模型暂时不可用
+  /v1/guide/source-trees/{commit_sha}:
+    parameters:
+      - in: path
+        name: commit_sha
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-fA-F0-9]{40}$'
+    get:
+      summary: 获取 ETOS 精确版本的完整源码树
+      description: 只查询服务端固定的 ETOS LLM Studio 仓库；结果按不可变 Commit 永久缓存。
+      responses:
+        '200':
+          description: 未截断的源码树
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuideSourceTree'
+        '304':
+          description: 客户端缓存仍然有效
+        '400':
+          description: Commit SHA 不是完整 40 位哈希
+        '502':
+          description: GitHub 暂时不可用且没有本地缓存
   /v1/admin/announcements:
     get:
       summary: 获取全部公告管理记录
@@ -879,7 +947,73 @@ components:
       type: http
       scheme: bearer
       description: 使用 ANNOUNCEMENT_ADMIN_TOKEN；浏览器管理台使用安全会话 Cookie
+    guideToken:
+      type: http
+      scheme: bearer
+      description: 通过 /v1/guide/token 获取的 30 秒 IP 绑定临时令牌
   schemas:
+    GuideToken:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    GuideChatCompletionRequest:
+      type: object
+      required: [messages]
+      properties:
+        model:
+          type: string
+          description: 为兼容 OpenAI 客户端保留，服务端会忽略该值。
+        stream:
+          type: boolean
+          description: 服务端始终使用流式响应。
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: true
+        tools:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+    GuideSourceTree:
+      type: object
+      required: [schema_version, repository, commit_sha, truncated, entries]
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        repository:
+          type: string
+          enum: [Eric-Terminal/ETOS-LLM-Studio]
+        commit_sha:
+          type: string
+          pattern: '^[a-f0-9]{40}$'
+        truncated:
+          type: boolean
+          enum: [false]
+        entries:
+          type: array
+          items:
+            type: object
+            required: [path, type]
+            properties:
+              path:
+                type: string
+              type:
+                type: string
+                enum: [blob, tree, commit]
+              size:
+                type: integer
     TelemetryUploadRequest:
       type: object
       additionalProperties: false

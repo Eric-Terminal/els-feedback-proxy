@@ -1,6 +1,6 @@
 # ELS Feedback & Notification Service
 
-面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单、客户端公告、意见征集、检查更新时间线、官方数据下发与匿名性能遥测。
+面向 `ETOS LLM Studio` 的统一服务入口。当前承载反馈工单、客户端公告、意见征集、检查更新时间线、官方数据下发、上下文向导与匿名性能遥测。
 
 ## 功能概览
 - `GET /v1/announcements`：返回已发布的客户端公告，支持 ETag 与 Cloudflare 边缘缓存
@@ -10,6 +10,9 @@
 - `GET /v1/distribution/files/<sha256>/<文件名>`：下载内容寻址的不可变官方文件
 - 官方数据清单也可下发 `provider.upsert` 配方，由客户端先预览再按合并策略写入 Provider 数据库
 - `GET /v1/updates/timeline`：使用服务端 GitHub 凭据读取 `dev` 分支提交与 CI 状态，并通过内存、ETag 和 Cloudflare 共享缓存
+- `POST /v1/guide/token`：签发按来源 IP 和 30 秒时间窗绑定的免费向导临时令牌
+- `POST /v1/chat/completions`：提供标准 OpenAI Chat Completions SSE 接口；服务端固定免费模型、重建系统提示并限制单并发
+- `GET /v1/guide/source-trees/<40 位 Commit SHA>`：返回固定 ETOS 仓库的完整源码树，并按不可变提交缓存
 - `POST /v1/telemetry`：接收 iOS MetricKit 指标与诊断；不使用 PoW，不持久化来源 IP
 - `GET /v1/admin/telemetry/status`：仅由管理监听器提供的遥测临时存储统计
 - `GET /v1/admin/telemetry/manifest`：仅由管理监听器提供的待拉取文件清单
@@ -67,6 +70,12 @@
 - `MODERATION_TIMEOUT_SECONDS`：单次审核超时秒数（默认 `15`）
 - `MODERATION_MAX_RETRIES`：审核失败重试次数（默认 `3`）
 - `MODERATION_TEMPERATURE`：审核温度（默认 `0`）
+- `GUIDE_ENABLED`：是否启用内置免费向导代理（默认 `false`）
+- `GUIDE_TOKEN_SECRET`：签发 30 秒临时令牌的服务端秘密；启用向导时必填且至少 32 个字符
+- `GUIDE_UPSTREAM_BASE_URL`：免费向导的 OpenAI 兼容上游地址（默认 `https://api.ericterminal.com/v1`）
+- `GUIDE_UPSTREAM_API_KEY`：免费向导上游 API Key；只保存在服务端环境中
+- `GUIDE_IP_CONCURRENCY`：同一来源 IP 的免费向导并发上限（默认 `1`，范围 `1~16`）
+- `GUIDE_REQUEST_TIMEOUT_SECONDS`：免费向导单次上游请求超时（默认 `180` 秒，范围 `30~600`）
 - `REDIS_ADDR`：Redis 地址（可选，示例 `127.0.0.1:6379`）
 - `REDIS_PASSWORD`：Redis 密码（可选）
 - `REDIS_DB`：Redis DB（默认 `0`）
@@ -88,6 +97,8 @@
 - `TELEMETRY_MAX_TOTAL_BYTES`：服务端临时遥测总字节上限（默认 `2147483648`）
 
 当配置 `REDIS_ADDR` 且可连通时，限流与去重会自动升级为 Redis 全局模式；连接失败会自动回退到内存模式。
+
+内置向导不复用反馈 challenge、PoW 或 App Attest。客户端系统消息会被丢弃，服务端重新注入固定职责边界，并把用户消息和工具结果作为低权限 JSON 数据包裹后再发往固定的 `Qwen/Qwen3.5-27B`。服务端不记录请求体、响应体或对话，只输出请求 ID、线路、状态、耗时和归一化错误类型。源码树接口与免费模型开关彼此独立；它只代理配置仓库的完整 40 位 Commit SHA，并把不可变结果缓存到 `DATA_DIR/guide-source-trees/`。
 
 性能遥测是一个独立边界：它不使用反馈 challenge、PoW、Redis 限流或 App
 Attest。来源 IP 只进入进程内一分钟固定窗口限流键，既不写入遥测文件，也不写入

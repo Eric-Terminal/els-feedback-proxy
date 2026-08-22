@@ -21,6 +21,7 @@ import (
 	"els-feedback-proxy/internal/buildinfo"
 	"els-feedback-proxy/internal/config"
 	"els-feedback-proxy/internal/github"
+	"els-feedback-proxy/internal/guide"
 	"els-feedback-proxy/internal/moderation"
 	"els-feedback-proxy/internal/security"
 	"els-feedback-proxy/internal/store"
@@ -47,6 +48,8 @@ type Server struct {
 	telemetry           *telemetrysvc.Store
 	telemetryLimiter    rateLimiter
 	developers          map[string]struct{}
+	guideProxy          *guide.Proxy
+	guideSourceTrees    *guide.SourceTreeService
 	engine              *gin.Engine
 	adminEngine         *gin.Engine
 }
@@ -125,6 +128,27 @@ func NewServer(
 		engine:           publicEngine,
 		adminEngine:      adminEngine,
 	}
+	if cfg.GuideEnabled {
+		guideProxy, err := guide.NewProxy(guide.ProxyConfig{
+			UpstreamBaseURL: cfg.GuideUpstreamBaseURL,
+			UpstreamAPIKey:  cfg.GuideUpstreamAPIKey,
+			TokenSecret:     cfg.GuideTokenSecret,
+			IPConcurrency:   cfg.GuideIPConcurrency,
+			RequestTimeout:  cfg.GuideRequestTimeout,
+		})
+		if err != nil {
+			panic(fmt.Sprintf("初始化内置向导代理失败: %v", err))
+		}
+		server.guideProxy = guideProxy
+	}
+	if sourceTreeGateway, ok := gh.(guide.SourceTreeGateway); ok {
+		server.guideSourceTrees = guide.NewSourceTreeService(
+			sourceTreeGateway,
+			cfg.GitHubOwner,
+			cfg.GitHubRepo,
+			cfg.DataDir,
+		)
+	}
 
 	server.engine.Use(gin.Recovery())
 	server.adminEngine.Use(gin.Recovery())
@@ -163,6 +187,8 @@ func (s *Server) registerRoutes() {
 			"announcement_admin_enabled": s.adminInterfaceEnabled(),
 			"survey_admin_enabled":       s.surveys != nil && s.adminInterfaceEnabled(),
 			"telemetry_enabled":          s.telemetry != nil,
+			"guide_enabled":              s.guideProxy != nil,
+			"guide_source_tree_enabled":  s.guideSourceTrees != nil,
 		})
 	})
 
@@ -170,6 +196,7 @@ func (s *Server) registerRoutes() {
 	s.registerDistributionRoutes()
 	s.registerSurveyRoutes()
 	s.registerUpdateTimelineRoutes()
+	s.registerGuideRoutes()
 	if s.telemetry != nil {
 		s.registerTelemetryRoutes()
 	}

@@ -17,14 +17,16 @@ type Client struct {
 	token      string
 	owner      string
 	repo       string
+	apiBaseURL string
 	httpClient *http.Client
 }
 
 func NewClient(token, owner, repo string) *Client {
 	return &Client{
-		token: token,
-		owner: owner,
-		repo:  repo,
+		token:      token,
+		owner:      owner,
+		repo:       repo,
+		apiBaseURL: "https://api.github.com",
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},

@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadAdminWebAuthDisabled(t *testing.T) {
@@ -53,5 +54,42 @@ func TestLoadTelemetryDefaultsAndLimits(t *testing.T) {
 	}
 	if cfg.TelemetryMaxTotalBytes != 1<<20 {
 		t.Fatalf("遥测总配额下限应为 1 MiB，实际 %d", cfg.TelemetryMaxTotalBytes)
+	}
+}
+
+func TestLoadGuideConfiguration(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-github-token")
+	t.Setenv("MODERATION_ENABLED", "false")
+	t.Setenv("GUIDE_ENABLED", "true")
+	t.Setenv("GUIDE_TOKEN_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("GUIDE_UPSTREAM_API_KEY", "test-guide-key")
+	t.Setenv("GUIDE_IP_CONCURRENCY", "99")
+	t.Setenv("GUIDE_REQUEST_TIMEOUT_SECONDS", "5")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("加载向导配置失败: %v", err)
+	}
+	if cfg.GuideUpstreamBaseURL != "https://api.ericterminal.com/v1" {
+		t.Fatalf("向导上游地址未标准化: %q", cfg.GuideUpstreamBaseURL)
+	}
+	if cfg.GuideIPConcurrency != 16 {
+		t.Fatalf("向导 IP 并发上限未钳制: %d", cfg.GuideIPConcurrency)
+	}
+	if cfg.GuideRequestTimeout != 30*time.Second {
+		t.Fatalf("向导超时下限未生效: %s", cfg.GuideRequestTimeout)
+	}
+}
+
+func TestLoadGuideRequiresServerSecrets(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-github-token")
+	t.Setenv("MODERATION_ENABLED", "false")
+	t.Setenv("GUIDE_ENABLED", "true")
+	t.Setenv("GUIDE_TOKEN_SECRET", "too-short")
+	t.Setenv("GUIDE_UPSTREAM_API_KEY", "")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "GUIDE_TOKEN_SECRET") {
+		t.Fatalf("向导签名秘密不足时应拒绝启动，实际错误: %v", err)
 	}
 }

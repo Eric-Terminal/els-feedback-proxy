@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -59,6 +60,12 @@ type Config struct {
 	ModerationTimeout        time.Duration
 	ModerationMaxRetries     int
 	ModerationTemperature    float64
+	GuideEnabled             bool
+	GuideTokenSecret         string
+	GuideUpstreamBaseURL     string
+	GuideUpstreamAPIKey      string
+	GuideIPConcurrency       int
+	GuideRequestTimeout      time.Duration
 }
 
 // Load 从环境变量加载配置
@@ -111,6 +118,12 @@ func Load() (Config, error) {
 		ModerationTimeout:        time.Duration(clampInt(getEnvAsInt("MODERATION_TIMEOUT_SECONDS", 15), 3, 120)) * time.Second,
 		ModerationMaxRetries:     clampInt(getEnvAsInt("MODERATION_MAX_RETRIES", 3), 1, 5),
 		ModerationTemperature:    clampFloat(getEnvAsFloat("MODERATION_TEMPERATURE", 0), 0, 2),
+		GuideEnabled:             getEnvAsBool("GUIDE_ENABLED", false),
+		GuideTokenSecret:         strings.TrimSpace(os.Getenv("GUIDE_TOKEN_SECRET")),
+		GuideUpstreamBaseURL:     normalizeModerationBaseURL(getEnv("GUIDE_UPSTREAM_BASE_URL", "https://api.ericterminal.com/v1")),
+		GuideUpstreamAPIKey:      strings.TrimSpace(os.Getenv("GUIDE_UPSTREAM_API_KEY")),
+		GuideIPConcurrency:       clampInt(getEnvAsInt("GUIDE_IP_CONCURRENCY", 1), 1, 16),
+		GuideRequestTimeout:      time.Duration(clampInt(getEnvAsInt("GUIDE_REQUEST_TIMEOUT_SECONDS", 180), 30, 600)) * time.Second,
 	}
 
 	if cfg.GitHubToken == "" {
@@ -142,6 +155,18 @@ func Load() (Config, error) {
 			return Config{}, errors.New("缺少 MODERATION_MODEL")
 		}
 		cfg.ModerationAPIBaseURL = normalizeModerationBaseURL(cfg.ModerationAPIBaseURL)
+	}
+	if cfg.GuideEnabled {
+		if len(cfg.GuideTokenSecret) < 32 {
+			return Config{}, errors.New("GUIDE_TOKEN_SECRET 至少需要 32 个字符")
+		}
+		if cfg.GuideUpstreamAPIKey == "" {
+			return Config{}, errors.New("缺少 GUIDE_UPSTREAM_API_KEY")
+		}
+		guideURL, err := url.Parse(cfg.GuideUpstreamBaseURL)
+		if err != nil || guideURL.Scheme != "https" || guideURL.Host == "" {
+			return Config{}, errors.New("GUIDE_UPSTREAM_BASE_URL 必须是有效的 HTTPS 地址")
+		}
 	}
 
 	return cfg, nil
