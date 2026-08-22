@@ -85,6 +85,7 @@ var allowedToolNames = map[string]struct{}{
 	"search_guide_documents":             {},
 	"read_guide_document":                {},
 	"search_source_tree":                 {},
+	"list_source_directory":              {},
 	"read_source_file":                   {},
 	"list_guide_provider_templates":      {},
 	"read_guide_provider_template":       {},
