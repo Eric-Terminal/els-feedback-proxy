@@ -47,6 +47,35 @@ func TestSourceTreeCachesImmutableCommit(t *testing.T) {
 	}
 }
 
+func TestSourceTreeReusesDiskCacheAfterServiceRestart(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	size := 128
+	gateway := &fakeSourceTreeGateway{tree: github.SourceTree{Entries: []github.SourceTreeEntry{
+		{Path: "ETOSCore/Guide.swift", Type: "blob", Size: &size},
+	}}}
+	dataDir := t.TempDir()
+	firstService := NewSourceTreeService(gateway, "Eric-Terminal", "ETOS-LLM-Studio", dataDir)
+	if _, err := firstService.Load(context.Background(), sha); err != nil {
+		t.Fatalf("首次缓存源码树失败: %v", err)
+	}
+	secondService := NewSourceTreeService(gateway, "Eric-Terminal", "ETOS-LLM-Studio", dataDir)
+	if _, err := secondService.Load(context.Background(), sha); err != nil {
+		t.Fatalf("服务重启后读取磁盘缓存失败: %v", err)
+	}
+	if gateway.calls != 1 {
+		t.Fatalf("服务重启后不应重复请求 GitHub，实际 %d 次", gateway.calls)
+	}
+}
+
+func TestSourceTreeRejectsTruncatedGatewayResponse(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	gateway := &fakeSourceTreeGateway{tree: github.SourceTree{Truncated: true}}
+	service := NewSourceTreeService(gateway, "Eric-Terminal", "ETOS-LLM-Studio", t.TempDir())
+	if _, err := service.Load(context.Background(), sha); err == nil {
+		t.Fatal("截断源码树不得写入不可变缓存")
+	}
+}
+
 func TestSourceTreeRejectsShortCommit(t *testing.T) {
 	service := NewSourceTreeService(&fakeSourceTreeGateway{}, "Eric-Terminal", "ETOS-LLM-Studio", t.TempDir())
 	if _, err := service.Load(context.Background(), "0123456"); err != ErrInvalidCommitSHA {

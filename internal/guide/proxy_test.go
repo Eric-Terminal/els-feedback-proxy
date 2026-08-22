@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,98 @@ func TestProxyStreamsOpenAICompatibleResponse(t *testing.T) {
 	}
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "[DONE]") {
 		t.Fatalf("未透传标准 SSE: status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestProxyCancellationReleasesConcurrencySlot(t *testing.T) {
+	started := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-releaseHandler:
+		}
+	}))
+	defer upstream.Close()
+	defer close(releaseHandler)
+
+	proxy := &Proxy{
+		endpoint:   upstream.URL,
+		apiKey:     "upstream-key",
+		httpClient: upstream.Client(),
+		tokens:     NewTokenManager("0123456789abcdef0123456789abcdef"),
+		limiter:    NewConcurrencyLimiter(1),
+	}
+	now := time.Unix(1_800_000_005, 0)
+	token := proxy.IssueToken("203.0.113.10", now).Token
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- proxy.Forward(
+			ctx,
+			httptest.NewRecorder(),
+			strings.NewReader(`{"messages":[{"role":"user","content":"怎么设置？"}]}`),
+			token,
+			"203.0.113.10",
+			"session-one",
+			"request-one",
+			now,
+		)
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("上游测试服务器未收到请求")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("取消客户端请求后应终止上游转发")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("取消客户端请求后上游转发未及时终止")
+	}
+	release, err := proxy.limiter.Acquire("203.0.113.10", "session-two")
+	if err != nil {
+		t.Fatalf("取消流后并发槽应立即释放: %v", err)
+	}
+	release()
+}
+
+func TestProxyDoesNotExposeUpstreamErrorBody(t *testing.T) {
+	secret := "upstream-secret-that-must-not-leak"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"`+secret+` 用户问题正文"}`)
+	}))
+	defer upstream.Close()
+
+	proxy := &Proxy{
+		endpoint:   upstream.URL,
+		apiKey:     secret,
+		httpClient: upstream.Client(),
+		tokens:     NewTokenManager("0123456789abcdef0123456789abcdef"),
+		limiter:    NewConcurrencyLimiter(1),
+	}
+	now := time.Unix(1_800_000_005, 0)
+	err := proxy.Forward(
+		context.Background(),
+		httptest.NewRecorder(),
+		strings.NewReader(`{"messages":[{"role":"user","content":"怎么设置？"}]}`),
+		proxy.IssueToken("203.0.113.10", now).Token,
+		"203.0.113.10",
+		"session-one",
+		"request-one",
+		now,
+	)
+	var httpError *HTTPError
+	if !errors.As(err, &httpError) {
+		t.Fatalf("上游拒绝应返回脱敏 HTTPError: %v", err)
+	}
+	if strings.Contains(httpError.Message, secret) || strings.Contains(httpError.Message, "用户问题正文") {
+		t.Fatalf("上游错误正文泄漏到客户端: %q", httpError.Message)
 	}
 }
 

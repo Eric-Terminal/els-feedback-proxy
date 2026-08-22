@@ -19,6 +19,9 @@ func TestTokenBindsIPAndThirtySecondWindow(t *testing.T) {
 	if err := manager.Validate(bundle.Token, "203.0.113.10", now.Add(30*time.Second)); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("跨过 30 秒时间窗后令牌应失效，实际错误: %v", err)
 	}
+	if err := manager.Validate(bundle.Token, "203.0.113.10", now.Add(-30*time.Second)); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("来自未来时间窗的令牌应失效，实际错误: %v", err)
+	}
 	if bundle.ExpiresAt.Sub(now) > 30*time.Second || !bundle.ExpiresAt.After(now) {
 		t.Fatalf("令牌过期时间不在当前 30 秒窗末尾: %s", bundle.ExpiresAt)
 	}
