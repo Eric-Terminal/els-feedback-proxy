@@ -27,6 +27,9 @@ func TestRenderIssueBodyContainsAutoUpdateMarker(t *testing.T) {
 	}
 
 	body := renderIssueBody(req, "ip-hash")
+	if !strings.HasPrefix(body, issueSubmissionNotice) {
+		t.Fatalf("Issue Markdown 顶部缺少自动化程序提交声明，body=%s", body)
+	}
 	if !strings.Contains(body, "由用户提出自动更新的") {
 		t.Fatalf("Issue Markdown 缺少自动更新标记，body=%s", body)
 	}
@@ -40,6 +43,9 @@ func TestRenderIssueBodyContainsAutoUpdateMarker(t *testing.T) {
 
 func TestRenderBlockedIssueBodyNoRawContent(t *testing.T) {
 	body := renderBlockedIssueBody("archive-123", "archive-archive-123.md", "AI 判定不适合公开")
+	if !strings.HasPrefix(body, issueSubmissionNotice) {
+		t.Fatalf("隐藏工单顶部缺少自动化程序提交声明，body=%s", body)
+	}
 	if !strings.Contains(body, "archive-123") {
 		t.Fatalf("隐藏工单缺少 archive_id")
 	}

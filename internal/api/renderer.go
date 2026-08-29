@@ -9,6 +9,8 @@ import (
 	"els-feedback-proxy/internal/moderation"
 )
 
+const issueSubmissionNotice = "> 此 Issue 由自动化程序提交。\n\n"
+
 func renderIssueTitle(req SubmitIssueRequest) string {
 	platform := req.Environment.Platform
 	if platform == "" {
@@ -19,6 +21,7 @@ func renderIssueTitle(req SubmitIssueRequest) string {
 
 func renderIssueBody(req SubmitIssueRequest, clientIPHash string) string {
 	builder := &strings.Builder{}
+	builder.WriteString(issueSubmissionNotice)
 
 	builder.WriteString("## 反馈类型\n")
 	if req.Type == "bug" {
@@ -102,6 +105,7 @@ func renderBlockedIssueTitle(req SubmitIssueRequest) string {
 
 func renderBlockedIssueBody(archiveID, archiveFileName, moderationMessage string) string {
 	builder := &strings.Builder{}
+	builder.WriteString(issueSubmissionNotice)
 	builder.WriteString("## 内容已隐藏\n")
 	builder.WriteString("- 该反馈被 AI 审核流程暂时隐藏，未在 GitHub 公开原文。\n")
 	builder.WriteString("- 请登录服务器查看本地留档后再手动处理。\n\n")
