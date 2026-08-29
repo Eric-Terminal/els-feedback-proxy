@@ -36,8 +36,11 @@ func TestSanitizedPayloadForcesModelAndRebuildsSystemPrompt(t *testing.T) {
 	if payload["model"] != BuiltInModel {
 		t.Fatalf("免费模型未被服务端固定: %#v", payload["model"])
 	}
-	if payload["stream"] != true || payload["max_tokens"] != float64(maxCompletionTokens) {
-		t.Fatalf("服务端流式与输出限制未强制生效: %#v", payload)
+	if payload["stream"] != true {
+		t.Fatalf("服务端流式响应未强制生效: %#v", payload)
+	}
+	if _, exists := payload["max_tokens"]; exists {
+		t.Fatalf("客户端输出限制不应传给上游: %#v", payload["max_tokens"])
 	}
 	messages := payload["messages"].([]any)
 	if len(messages) != 3 {
@@ -56,6 +59,46 @@ func TestSanitizedPayloadForcesModelAndRebuildsSystemPrompt(t *testing.T) {
 		!strings.Contains(last, "<scope_after>") ||
 		!strings.Contains(last, "这个模型页面怎么配置") {
 		t.Fatalf("用户内容未放入不可信边界: %s", last)
+	}
+}
+
+func TestSanitizedPayloadAcceptsLongConversationWithinRequestBoundary(t *testing.T) {
+	messages := make([]map[string]string, 0, 65)
+	for index := 0; index < 65; index++ {
+		messages = append(messages, map[string]string{
+			"role":    "user",
+			"content": strings.Repeat("向导上下文", 260),
+		})
+	}
+	raw, err := json.Marshal(map[string]any{"messages": messages})
+	if err != nil {
+		t.Fatalf("编码长对话失败: %v", err)
+	}
+	if len(raw) >= maxRequestBytes {
+		t.Fatalf("测试请求意外超过 HTTP 请求边界: %d", len(raw))
+	}
+	if _, err := sanitizedPayload(bytes.NewReader(raw)); err != nil {
+		t.Fatalf("消息数量和字符总量不应再单独限制: %v", err)
+	}
+}
+
+func TestNewProxyOnlyLimitsResponseHeaderWait(t *testing.T) {
+	proxy, err := NewProxy(ProxyConfig{
+		UpstreamBaseURL: "https://api.example.com/v1",
+		UpstreamAPIKey:  "upstream-key",
+		TokenSecret:     "0123456789abcdef0123456789abcdef",
+		IPConcurrency:   1,
+		RequestTimeout:  45 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("初始化向导代理失败: %v", err)
+	}
+	if proxy.httpClient.Timeout != 0 {
+		t.Fatalf("流式响应不应设置整段请求超时: %s", proxy.httpClient.Timeout)
+	}
+	transport, ok := proxy.httpClient.Transport.(*http.Transport)
+	if !ok || transport.ResponseHeaderTimeout != 45*time.Second {
+		t.Fatalf("等待上游响应头的超时未生效: %#v", proxy.httpClient.Transport)
 	}
 }
 
@@ -164,6 +207,41 @@ func TestProxyStreamsOpenAICompatibleResponse(t *testing.T) {
 	}
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "[DONE]") {
 		t.Fatalf("未透传标准 SSE: status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestProxyDoesNotTruncateLargeStreamingResponse(t *testing.T) {
+	largeResponse := "data: " + strings.Repeat("x", 2*1024*1024) + "\n\ndata: [DONE]\n\n"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, largeResponse)
+	}))
+	defer upstream.Close()
+
+	proxy := &Proxy{
+		endpoint:   upstream.URL,
+		apiKey:     "upstream-key",
+		httpClient: upstream.Client(),
+		tokens:     NewTokenManager("0123456789abcdef0123456789abcdef"),
+		limiter:    NewConcurrencyLimiter(1),
+	}
+	now := time.Unix(1_800_000_005, 0)
+	recorder := httptest.NewRecorder()
+	err := proxy.Forward(
+		context.Background(),
+		recorder,
+		strings.NewReader(`{"messages":[{"role":"user","content":"详细解释这个页面"}]}`),
+		proxy.IssueToken("203.0.113.10", now).Token,
+		"203.0.113.10",
+		"session-large-response",
+		"request-large-response",
+		now,
+	)
+	if err != nil {
+		t.Fatalf("大于旧响应上限的流不应被截断: %v", err)
+	}
+	if recorder.Body.String() != largeResponse {
+		t.Fatalf("大响应未被完整透传: got=%d want=%d", recorder.Body.Len(), len(largeResponse))
 	}
 }
 

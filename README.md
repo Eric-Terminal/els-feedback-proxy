@@ -75,7 +75,7 @@
 - `GUIDE_UPSTREAM_BASE_URL`：免费向导的 OpenAI 兼容上游地址（默认 `https://api.ericterminal.com/v1`）
 - `GUIDE_UPSTREAM_API_KEY`：免费向导上游 API Key；只保存在服务端环境中
 - `GUIDE_IP_CONCURRENCY`：同一来源 IP 的免费向导并发上限（默认 `1`，范围 `1~16`）
-- `GUIDE_REQUEST_TIMEOUT_SECONDS`：免费向导单次上游请求超时（默认 `180` 秒，范围 `30~600`）
+- `GUIDE_REQUEST_TIMEOUT_SECONDS`：免费向导等待上游开始响应的超时（默认 `180` 秒，范围 `30~600`）；流式回答开始后不限制总时长
 - `REDIS_ADDR`：Redis 地址（可选，示例 `127.0.0.1:6379`）
 - `REDIS_PASSWORD`：Redis 密码（可选）
 - `REDIS_DB`：Redis DB（默认 `0`）

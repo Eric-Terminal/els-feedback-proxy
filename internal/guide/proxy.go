@@ -14,13 +14,9 @@ import (
 )
 
 const (
-	BuiltInModel        = "Qwen/Qwen3.5-27B"
-	maxRequestBytes     = 512 * 1024
-	maxResponseBytes    = 2 * 1024 * 1024
-	maxMessages         = 64
-	maxTools            = 32
-	maxTextCharacters   = 80_000
-	maxCompletionTokens = 4_096
+	BuiltInModel    = "Qwen/Qwen3.5-27B"
+	maxRequestBytes = 512 * 1024
+	maxTools        = 32
 )
 
 // ProxyConfig 只接受服务端配置。模型名称有意不开放给客户端或环境变量改写。
@@ -29,7 +25,8 @@ type ProxyConfig struct {
 	UpstreamAPIKey  string
 	TokenSecret     string
 	IPConcurrency   int
-	RequestTimeout  time.Duration
+	// RequestTimeout 只约束等待上游响应头，不限制已经开始的流式回答总时长。
+	RequestTimeout time.Duration
 }
 
 type Proxy struct {
@@ -115,14 +112,15 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 	if cfg.RequestTimeout <= 0 {
 		cfg.RequestTimeout = 180 * time.Second
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// 流开始后由请求上下文和用户取消负责终止；这里只防止上游迟迟不开始响应。
+	transport.ResponseHeaderTimeout = cfg.RequestTimeout
 	return &Proxy{
-		endpoint: endpoint,
-		apiKey:   strings.TrimSpace(cfg.UpstreamAPIKey),
-		httpClient: &http.Client{
-			Timeout: cfg.RequestTimeout,
-		},
-		tokens:  NewTokenManager(cfg.TokenSecret),
-		limiter: NewConcurrencyLimiter(cfg.IPConcurrency),
+		endpoint:   endpoint,
+		apiKey:     strings.TrimSpace(cfg.UpstreamAPIKey),
+		httpClient: &http.Client{Transport: transport},
+		tokens:     NewTokenManager(cfg.TokenSecret),
+		limiter:    NewConcurrencyLimiter(cfg.IPConcurrency),
 	}, nil
 }
 
@@ -184,17 +182,12 @@ func (p *Proxy) Forward(
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 	buffer := make([]byte, 32*1024)
-	written := int64(0)
 	for {
 		count, readErr := response.Body.Read(buffer)
 		if count > 0 {
-			if written+int64(count) > maxResponseBytes {
-				return &HTTPError{Status: http.StatusBadGateway, Kind: "response_too_large", Message: "内置向导响应超过大小限制"}
-			}
 			if _, err := w.Write(buffer[:count]); err != nil {
 				return err
 			}
-			written += int64(count)
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -221,8 +214,8 @@ func sanitizedPayload(reader io.Reader) ([]byte, error) {
 	if err := decoder.Decode(&incoming); err != nil {
 		return nil, errors.New("向导请求不是有效的 Chat Completions JSON")
 	}
-	if len(incoming.Messages) == 0 || len(incoming.Messages) > maxMessages {
-		return nil, fmt.Errorf("向导消息数量必须为 1 到 %d 条", maxMessages)
+	if len(incoming.Messages) == 0 {
+		return nil, errors.New("向导请求至少需要一条消息")
 	}
 	if len(incoming.Tools) > maxTools {
 		return nil, fmt.Errorf("向导工具数量不能超过 %d 个", maxTools)
@@ -239,7 +232,6 @@ func sanitizedPayload(reader io.Reader) ([]byte, error) {
 
 	messages := make([]map[string]any, 0, len(incoming.Messages)+1)
 	messages = append(messages, map[string]any{"role": "system", "content": authoritativePrompt})
-	characterCount := 0
 	pendingToolCalls := make(map[string]string)
 	for _, message := range incoming.Messages {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
@@ -249,10 +241,6 @@ func sanitizedPayload(reader io.Reader) ([]byte, error) {
 		text, err := textContent(message.Content)
 		if err != nil {
 			return nil, err
-		}
-		characterCount += len([]rune(text))
-		if characterCount > maxTextCharacters {
-			return nil, errors.New("向导对话文本超过长度限制")
 		}
 		switch role {
 		case "user":
@@ -313,10 +301,9 @@ func sanitizedPayload(reader io.Reader) ([]byte, error) {
 	}
 
 	payload := map[string]any{
-		"model":      BuiltInModel,
-		"messages":   messages,
-		"stream":     true,
-		"max_tokens": maxCompletionTokens,
+		"model":    BuiltInModel,
+		"messages": messages,
+		"stream":   true,
 	}
 	if len(incoming.Tools) > 0 {
 		payload["tools"] = incoming.Tools

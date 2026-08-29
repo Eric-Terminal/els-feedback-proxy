@@ -77,7 +77,7 @@ func TestLoadGuideConfiguration(t *testing.T) {
 		t.Fatalf("向导 IP 并发上限未钳制: %d", cfg.GuideIPConcurrency)
 	}
 	if cfg.GuideRequestTimeout != 30*time.Second {
-		t.Fatalf("向导超时下限未生效: %s", cfg.GuideRequestTimeout)
+		t.Fatalf("向导响应头超时下限未生效: %s", cfg.GuideRequestTimeout)
 	}
 }
 
