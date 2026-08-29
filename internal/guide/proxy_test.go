@@ -102,13 +102,34 @@ func TestNewProxyOnlyLimitsResponseHeaderWait(t *testing.T) {
 	}
 }
 
-func TestSanitizedPayloadRejectsUnknownTools(t *testing.T) {
+func TestSanitizedPayloadAcceptsClientDeclaredPageTool(t *testing.T) {
 	raw := `{
 		"messages":[{"role":"user","content":"帮我看看设置"}],
-		"tools":[{"type":"function","function":{"name":"read_any_file","parameters":{"type":"object"}}}]
+		"tools":[{"type":"function","function":{"name":"create_custom_page_item","parameters":{"type":"object"}}}]
 	}`
-	if _, err := sanitizedPayload(strings.NewReader(raw)); err == nil || !strings.Contains(err.Error(), "不允许的向导工具") {
-		t.Fatalf("未知工具应被拒绝，实际错误: %v", err)
+	if _, err := sanitizedPayload(strings.NewReader(raw)); err != nil {
+		t.Fatalf("页面显式声明的自定义工具应被转发: %v", err)
+	}
+}
+
+func TestSanitizedPayloadRejectsInvalidOrDuplicateToolNames(t *testing.T) {
+	invalid := `{
+		"messages":[{"role":"user","content":"帮我看看设置"}],
+		"tools":[{"type":"function","function":{"name":"invalid tool","parameters":{"type":"object"}}}]
+	}`
+	if _, err := sanitizedPayload(strings.NewReader(invalid)); err == nil || !strings.Contains(err.Error(), "名称无效") {
+		t.Fatalf("非法工具名称应被拒绝，实际错误: %v", err)
+	}
+
+	duplicate := `{
+		"messages":[{"role":"user","content":"帮我看看设置"}],
+		"tools":[
+			{"type":"function","function":{"name":"same_tool","parameters":{"type":"object"}}},
+			{"type":"function","function":{"name":"same_tool","parameters":{"type":"object"}}}
+		]
+	}`
+	if _, err := sanitizedPayload(strings.NewReader(duplicate)); err == nil || !strings.Contains(err.Error(), "名称重复") {
+		t.Fatalf("重复工具名称应被拒绝，实际错误: %v", err)
 	}
 }
 
