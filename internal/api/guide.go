@@ -20,6 +20,9 @@ func (s *Server) registerGuideRoutes() {
 	if s.guideSourceTrees != nil {
 		s.engine.GET("/v1/guide/source-trees/:commitSHA", s.handleGuideSourceTree)
 	}
+	if s.guideSourcePacks != nil {
+		s.engine.GET("/v1/guide/source-packs/:commitSHA", s.handleGuideSourcePack)
+	}
 }
 
 func (s *Server) handleGuideToken(c *gin.Context) {
@@ -94,6 +97,31 @@ func (s *Server) handleGuideSourceTree(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (s *Server) handleGuideSourcePack(c *gin.Context) {
+	commitSHA := strings.ToLower(strings.TrimSpace(c.Param("commitSHA")))
+	pack, err := s.guideSourcePacks.Load(c.Request.Context(), commitSHA)
+	if err != nil {
+		if errors.Is(err, guide.ErrInvalidCommitSHA) {
+			writeError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(c, http.StatusBadGateway, "暂时无法获取这个版本的源码包")
+		return
+	}
+	etag := `"guide-source-pack-` + pack.CommitSHA + `"`
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.Header("Cloudflare-CDN-Cache-Control", "public, max-age=31536000, immutable")
+	c.Header("ETag", etag)
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", `attachment; filename="etos-guide-sources-`+pack.CommitSHA+`.zip"`)
+	c.Header("X-Content-Type-Options", "nosniff")
+	if etagMatches(c.GetHeader("If-None-Match"), etag) {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	http.ServeFile(c.Writer, c.Request, pack.Path)
 }
 
 func validGuideSessionID(value string) bool {

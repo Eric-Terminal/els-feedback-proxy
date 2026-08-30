@@ -13,6 +13,7 @@
 - `POST /v1/guide/token`：签发按来源 IP 和 30 秒时间窗绑定的免费向导临时令牌
 - `POST /v1/chat/completions`：提供标准 OpenAI Chat Completions SSE 接口；服务端固定免费模型、重建系统提示并限制单并发
 - `GET /v1/guide/source-trees/<40 位 Commit SHA>`：返回固定 ETOS 仓库的完整源码树，并按不可变提交缓存
+- `GET /v1/guide/source-packs/<40 位 Commit SHA>`：返回过滤后的纯文本源码 ZIP，供向导在客户端按当前版本缓存、全文搜索和分段读取
 - `POST /v1/telemetry`：接收 iOS MetricKit 指标与诊断；不使用 PoW，不持久化来源 IP
 - `GET /v1/admin/telemetry/status`：仅由管理监听器提供的遥测临时存储统计
 - `GET /v1/admin/telemetry/manifest`：仅由管理监听器提供的待拉取文件清单
@@ -98,7 +99,7 @@
 
 当配置 `REDIS_ADDR` 且可连通时，限流与去重会自动升级为 Redis 全局模式；连接失败会自动回退到内存模式。
 
-内置向导不复用反馈 challenge、PoW 或 App Attest。客户端系统消息会被丢弃，服务端重新注入固定职责边界，并把用户消息和工具结果作为低权限 JSON 数据包裹后再发往固定的 `Qwen/Qwen3.5-27B`。服务端不记录请求体、响应体或对话，只输出请求 ID、线路、状态、耗时和归一化错误类型。源码树接口与免费模型开关彼此独立；它只代理配置仓库的完整 40 位 Commit SHA，并把不可变结果缓存到 `DATA_DIR/guide-source-trees/`。
+内置向导不复用反馈 challenge、PoW 或 App Attest。客户端系统消息会被丢弃，服务端重新注入固定职责边界，并把用户消息和工具结果作为低权限 JSON 数据包裹后再发往固定的 `Qwen/Qwen3.5-27B`。服务端不记录请求体、响应体或对话，只输出请求 ID、线路、状态、耗时和归一化错误类型。源码树与源码包接口和免费模型开关彼此独立；它们只代理配置仓库的完整 40 位 Commit SHA，并把不可变结果分别缓存到 `DATA_DIR/guide-source-trees/` 与 `DATA_DIR/guide-source-packs/`。源码包仅保留允许的 UTF-8 文本源码和配置文件，不包含图片、模型或其他二进制资源。
 
 性能遥测是一个独立边界：它不使用反馈 challenge、PoW、Redis 限流或 App
 Attest。来源 IP 只进入进程内一分钟固定窗口限流键，既不写入遥测文件，也不写入

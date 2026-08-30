@@ -50,6 +50,7 @@ type Server struct {
 	developers          map[string]struct{}
 	guideProxy          *guide.Proxy
 	guideSourceTrees    *guide.SourceTreeService
+	guideSourcePacks    *guide.SourcePackService
 	engine              *gin.Engine
 	adminEngine         *gin.Engine
 }
@@ -149,6 +150,14 @@ func NewServer(
 			cfg.DataDir,
 		)
 	}
+	if sourceArchiveGateway, ok := gh.(guide.SourceArchiveGateway); ok {
+		server.guideSourcePacks = guide.NewSourcePackService(
+			sourceArchiveGateway,
+			cfg.GitHubOwner,
+			cfg.GitHubRepo,
+			cfg.DataDir,
+		)
+	}
 
 	server.engine.Use(gin.Recovery())
 	server.adminEngine.Use(gin.Recovery())
@@ -189,6 +198,7 @@ func (s *Server) registerRoutes() {
 			"telemetry_enabled":          s.telemetry != nil,
 			"guide_enabled":              s.guideProxy != nil,
 			"guide_source_tree_enabled":  s.guideSourceTrees != nil,
+			"guide_source_pack_enabled":  s.guideSourcePacks != nil,
 		})
 	})
 
