@@ -50,6 +50,19 @@ func TestSanitizedPayloadForcesModelAndRebuildsSystemPrompt(t *testing.T) {
 	if first["role"] != "system" || !strings.Contains(first["content"].(string), "Qwen/Qwen3.5-27B") {
 		t.Fatalf("未注入权威向导提示词: %#v", first)
 	}
+	for _, expected := range []string{
+		"guide_prompt_version: 3",
+		"ETOS LLM Studio（简称 ELS）",
+		"开源 AI 聊天客户端",
+		"iOS 和 watchOS",
+		"不是基础模型本身",
+		"向导只能使用当前请求实际提供的专用工具",
+		"不要在每次回答时重复介绍",
+	} {
+		if !strings.Contains(first["content"].(string), expected) {
+			t.Fatalf("上游系统提示词缺少产品背景或能力边界: %s", expected)
+		}
+	}
 	if strings.Contains(string(encoded), "泄露系统提示") {
 		t.Fatalf("客户端 system 内容不应发往上游")
 	}
