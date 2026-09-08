@@ -61,3 +61,10 @@ func (c *issueStatusCache) Delete(issueNumber int) {
 
 	delete(c.entries, issueNumber)
 }
+
+func (c *issueStatusCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	clear(c.entries)
+}

@@ -42,7 +42,7 @@ type githubWebhookRelease struct {
 }
 
 func (s *Server) handleGitHubWebhook(c *gin.Context) {
-	if s.selfUpdater == nil || strings.TrimSpace(s.cfg.GitHubWebhookSecret) == "" {
+	if strings.TrimSpace(s.cfg.GitHubWebhookSecret) == "" {
 		writeError(c, http.StatusNotFound, "GitHub Webhook 未启用")
 		return
 	}
@@ -78,6 +78,8 @@ func (s *Server) handleGitHubWebhook(c *gin.Context) {
 		})
 	case "release":
 		s.handleGitHubReleaseWebhook(c, body, deliveryID)
+	case "push":
+		s.handleFeedbackPushWebhook(c, body, deliveryID)
 	default:
 		c.JSON(http.StatusAccepted, gin.H{
 			"success":     true,
@@ -90,6 +92,10 @@ func (s *Server) handleGitHubWebhook(c *gin.Context) {
 }
 
 func (s *Server) handleGitHubReleaseWebhook(c *gin.Context, body []byte, deliveryID string) {
+	if s.selfUpdater == nil {
+		writeError(c, http.StatusNotFound, "自动更新未启用")
+		return
+	}
 	var payload githubWebhookReleasePayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(c, http.StatusBadRequest, "GitHub release 事件负载无效")
@@ -158,6 +164,25 @@ func (s *Server) handleGitHubReleaseWebhook(c *gin.Context, body []byte, deliver
 		"accepted":    accepted,
 		"status":      s.selfUpdater.statusSnapshot(),
 	})
+}
+
+func (s *Server) handleFeedbackPushWebhook(c *gin.Context, body []byte, deliveryID string) {
+	var payload struct {
+		Repository githubWebhookRepository `json:"repository"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeError(c, http.StatusBadRequest, "GitHub push 事件负载无效")
+		return
+	}
+	expectedRepository := s.cfg.GitHubOwner + "/" + s.cfg.GitHubRepo
+	if !strings.EqualFold(strings.TrimSpace(payload.Repository.FullName), expectedRepository) {
+		c.JSON(http.StatusAccepted, gin.H{"success": true, "event": "push", "ignored": true, "reason": "仓库不匹配"})
+		return
+	}
+
+	// 关联规则由 GitHub 时间线决定，不从提交文案自行猜测 #号；推送后使旧工单缓存失效。
+	s.statusCache.Clear()
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "event": "push", "delivery_id": deliveryID})
 }
 
 func isValidGitHubWebhookSignature(secret string, body []byte, signature string) bool {

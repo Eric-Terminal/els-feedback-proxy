@@ -318,8 +318,15 @@ docker compose up -d --build
 
 - Payload URL：`https://feedback.els.ericterminal.com/v1/github/webhooks`
 - Content type：`application/json`
-- Event：`Releases`
+- 服务端仓库 Event：`Releases`（发布自动更新）
+- 客户端反馈仓库 Event：`Pushes`（代码推送后清除反馈状态缓存）
 - Secret：与服务器 `GITHUB_WEBHOOK_SECRET` 相同
+
+反馈仓库使用 `GITHUB_OWNER/GITHUB_REPO`，发布仓库使用 `SELF_UPDATE_REPO_OWNER/SELF_UPDATE_REPO_NAME`，两者分别校验。反馈推送事件不要求开启服务端自动更新，也不会触发发布；未配置客户端仓库 Webhook 时，原有一小时状态缓存仍按 TTL 过期。
+
+反馈状态接口独立读取 GitHub Issue 时间线中的 `referenced` 事件，并在 `timeline_events` 中返回关联 Commit 的完整信息。提交信息中的 `#133` 等引用由 GitHub 识别，无需额外评论。正文、评论和 Commit 消息按原文返回，供客户端渲染 Markdown；提交接口原有的 4000 字符校验会拒绝超长输入，不会静默截断，GitHub 开发者回复的读取不受这一输入限制。
+
+`updated_at` 表示 Issue、评论和引用提交中的最新动态时间，避免 GitHub 仅新增引用而不更新 Issue 时间时漏掉进度。时间线或 Commit 读取失败会返回查询错误，不把不完整结果缓存成空动态。客户端按引用事件 ID 保存通知基线，在启动或刷新成功后发送本地提醒；服务端不会向 APNs 推送。
 
 ### 健康检查返回
 `GET /v1/healthz` 现在会额外返回：

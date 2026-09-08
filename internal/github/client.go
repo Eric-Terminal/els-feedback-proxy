@@ -210,7 +210,7 @@ func (c *Client) GetAuthenticatedLogin(ctx context.Context) (string, error) {
 }
 
 func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStatus, error) {
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d", c.owner, c.repo, issueNumber)
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", strings.TrimRight(c.apiBaseURL, "/"), c.owner, c.repo, issueNumber)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return IssueStatus{}, fmt.Errorf("创建 issue 查询请求失败: %w", err)
@@ -240,7 +240,6 @@ func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStat
 			Name string `json:"name"`
 		} `json:"labels"`
 		CommentsURL string `json:"comments_url"`
-		TimelineURL string `json:"timeline_url"`
 	}
 
 	if err := json.Unmarshal(data, &issue); err != nil {
@@ -264,7 +263,21 @@ func (c *Client) GetIssueStatus(ctx context.Context, issueNumber int) (IssueStat
 		return IssueStatus{}, err
 	}
 
-	timelineEvents, _ := c.fetchReferencedTimelineEvents(ctx, issue.TimelineURL)
+	// 引用提交不一定改变 Issue.updated_at，必须独立读取时间线，失败时也不能缓存成“没有动态”。
+	timelineEvents, err := c.fetchReferencedTimelineEvents(ctx, endpoint+"/timeline")
+	if err != nil {
+		return IssueStatus{}, err
+	}
+	for _, event := range timelineEvents {
+		if event.CreatedAt.After(updatedAt) {
+			updatedAt = event.CreatedAt
+		}
+	}
+	for _, comment := range comments {
+		if comment.CreatedAt.After(updatedAt) {
+			updatedAt = comment.CreatedAt
+		}
+	}
 
 	return IssueStatus{
 		Number:         issue.Number,
@@ -398,11 +411,7 @@ func (c *Client) fetchReferencedTimelineEvents(ctx context.Context, endpoint str
 
 			commit, err := c.fetchCommit(ctx, item.CommitURL, item.CommitID)
 			if err != nil {
-				commit = ReferencedCommit{
-					SHA:      strings.TrimSpace(item.CommitID),
-					ShortSHA: shortSHA(item.CommitID),
-					HTMLURL:  c.commitHTMLURL(item.CommitID),
-				}
+				return nil, err
 			}
 			if commit.CommittedAt.IsZero() {
 				commit.CommittedAt = createdAt
@@ -428,7 +437,7 @@ func (c *Client) fetchReferencedTimelineEvents(ctx context.Context, endpoint str
 func (c *Client) fetchCommit(ctx context.Context, endpoint string, fallbackSHA string) (ReferencedCommit, error) {
 	requestURL := strings.TrimSpace(endpoint)
 	if requestURL == "" {
-		requestURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s", c.owner, c.repo, fallbackSHA)
+		requestURL = fmt.Sprintf("%s/repos/%s/%s/commits/%s", strings.TrimRight(c.apiBaseURL, "/"), c.owner, c.repo, fallbackSHA)
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
