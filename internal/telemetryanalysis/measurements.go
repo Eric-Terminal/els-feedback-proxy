@@ -11,6 +11,7 @@ import (
 func (a *analyzer) collectMeasurements(value any, path string, row indexRow) {
 	switch typed := value.(type) {
 	case map[string]any:
+		row = reportMetadata(row, typed)
 		if number, unit, ok := explicitMeasurement(typed); ok {
 			a.addMeasurement(row, normalizeMetricPath(path), number, unit)
 			return
@@ -21,6 +22,10 @@ func (a *analyzer) collectMeasurements(value any, path string, row indexRow) {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
+			// 桶边界是分位数的区间，不能作为额外资源测量样本。
+			if key == "histogram" || key == "histogramValue" || key == "metaData" || key == "diagnosticMetaData" || key == "callStackTree" {
+				continue
+			}
 			a.collectMeasurements(typed[key], path+"."+key, row)
 		}
 	case []any:
@@ -68,7 +73,8 @@ func (a *analyzer) addMeasurement(
 	unit string,
 ) {
 	value, unit = normalizeUnit(value, unit)
-	if math.IsNaN(value) || math.IsInf(value, 0) {
+	if reason := measurementOutlierReason(metricPath, value, unit); reason != "" {
+		a.outliers = append(a.outliers, measurementOutlier{PayloadID: row.PayloadID, SourcePath: row.SourcePath, MetricPath: metricPath, Value: value, Unit: unit, Reason: reason})
 		return
 	}
 	key := measurementKey{
@@ -112,6 +118,7 @@ func (a *analyzer) finalizeMeasurements() []measurementRow {
 
 func measurementSortKey(row measurementRow) string {
 	return strings.Join([]string{
+		row.BundleID, row.PayloadClass, row.DistributionEvidence,
 		row.AppVersion,
 		row.AppBuild,
 		row.Distribution,
@@ -122,12 +129,17 @@ func measurementSortKey(row measurementRow) string {
 	}, "|")
 }
 
-// collectSignposts 单独汇总 totalCount，便于识别高频但单次很短的重复工作。
+// collectSignposts 汇总 MetricKit 的次数；totalCount 只兼容已有的旧导出格式。
 func (a *analyzer) collectSignposts(value any, row indexRow) {
 	switch typed := value.(type) {
 	case map[string]any:
+		row = reportMetadata(row, typed)
 		name := stringValue(typed["signpostName"])
-		totalCount, hasCount := integerCount(typed["totalCount"])
+		countValue, exists := typed["totalSignpostCount"]
+		if !exists {
+			countValue = typed["totalCount"]
+		}
+		totalCount, hasCount := integerCount(countValue)
 		if name != "" && hasCount && totalCount >= 0 {
 			key := signpostKey{
 				analysisDimensions: dimensionsFor(row),
@@ -169,6 +181,7 @@ func (a *analyzer) finalizeSignposts() []signpostRow {
 
 func signpostSortKey(row signpostRow) string {
 	return strings.Join([]string{
+		row.BundleID, row.PayloadClass, row.DistributionEvidence,
 		row.AppVersion,
 		row.AppBuild,
 		row.Distribution,

@@ -29,43 +29,57 @@ type Result struct {
 	Symbolicated      int    `json:"symbolicated_frames"`
 	MissingSymbols    int    `json:"missing_symbol_uuids"`
 	ParseErrorCount   int    `json:"parse_error_count"`
+	OutlierCount      int    `json:"measurement_outlier_count"`
 }
 
 type indexRow struct {
-	PayloadID    string
-	Kind         string
-	CapturedAt   string
-	PeriodStart  string
-	PeriodEnd    string
-	AppVersion   string
-	AppBuild     string
-	Distribution string
-	OSVersion    string
-	DeviceClass  string
-	Architecture string
-	SourcePath   string
-	SizeBytes    int64
+	BundleID             string
+	PayloadClass         string
+	BuildSource          string
+	CapturedBuild        string
+	DistributionEvidence string
+	PayloadID            string
+	Kind                 string
+	CapturedAt           string
+	PeriodStart          string
+	PeriodEnd            string
+	AppVersion           string
+	AppBuild             string
+	Distribution         string
+	OSVersion            string
+	DeviceClass          string
+	Architecture         string
+	SourcePath           string
+	SizeBytes            int64
 }
 
 type diagnosticRow struct {
-	PayloadID     string
-	AppVersion    string
-	AppBuild      string
-	Distribution  string
-	OSVersion     string
-	DeviceClass   string
-	Type          string
-	DurationValue float64
-	DurationUnit  string
-	TopFrame      string
+	BundleID             string
+	PayloadClass         string
+	BuildSource          string
+	CapturedBuild        string
+	DistributionEvidence string
+	PayloadID            string
+	AppVersion           string
+	AppBuild             string
+	Distribution         string
+	OSVersion            string
+	DeviceClass          string
+	Type                 string
+	DurationValue        float64
+	DurationUnit         string
+	TopFrame             string
 }
 
 type analysisDimensions struct {
-	AppVersion   string
-	AppBuild     string
-	Distribution string
-	OSVersion    string
-	DeviceClass  string
+	BundleID             string
+	PayloadClass         string
+	DistributionEvidence string
+	AppVersion           string
+	AppBuild             string
+	Distribution         string
+	OSVersion            string
+	DeviceClass          string
 }
 
 type histogramKey struct {
@@ -131,6 +145,9 @@ type signpostRow struct {
 }
 
 type diagnosticStackRow struct {
+	BundleID     string
+	ThreadIndex  int
+	Attribution  string
 	PayloadID    string
 	AppBuild     string
 	Distribution string
@@ -175,9 +192,10 @@ type missingSymbolRow struct {
 }
 
 type symbolicationResult struct {
-	Symbol   string
-	Status   string
-	DSYMPath string
+	Architecture string
+	Symbol       string
+	Status       string
+	DSYMPath     string
 }
 
 type frameSymbolicator interface {
@@ -192,11 +210,14 @@ type frameSymbolicator interface {
 
 func dimensionsFor(row indexRow) analysisDimensions {
 	return analysisDimensions{
-		AppVersion:   row.AppVersion,
-		AppBuild:     row.AppBuild,
-		Distribution: row.Distribution,
-		OSVersion:    row.OSVersion,
-		DeviceClass:  row.DeviceClass,
+		BundleID:             row.BundleID,
+		PayloadClass:         row.PayloadClass,
+		DistributionEvidence: row.DistributionEvidence,
+		AppVersion:           row.AppVersion,
+		AppBuild:             row.AppBuild,
+		Distribution:         row.Distribution,
+		OSVersion:            row.OSVersion,
+		DeviceClass:          row.DeviceClass,
 	}
 }
 
@@ -233,6 +254,11 @@ func numberValue(value any) (float64, bool) {
 
 func uintValue(value any) (uint64, bool) {
 	switch typed := value.(type) {
+	case bool:
+		if typed {
+			return 1, true
+		}
+		return 0, true
 	case json.Number:
 		number, err := strconv.ParseUint(typed.String(), 10, 64)
 		return number, err == nil

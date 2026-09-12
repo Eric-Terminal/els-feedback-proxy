@@ -31,6 +31,8 @@ type analyzer struct {
 	options          Options
 	symbolicator     frameSymbolicator
 	indexRows        []indexRow
+	sampleRows       []indexRow
+	outliers         []measurementOutlier
 	diagnosticRows   []diagnosticRow
 	diagnosticStacks []diagnosticStackRow
 	histograms       map[histogramKey]*histogramAccumulator
@@ -117,6 +119,7 @@ func Analyze(options Options) (Result, error) {
 		Symbolicated:      instance.symbolicated,
 		MissingSymbols:    len(instance.missing),
 		ParseErrorCount:   len(instance.parseErrors),
+		OutlierCount:      len(instance.outliers),
 	}, nil
 }
 
@@ -175,25 +178,35 @@ func (a *analyzer) processFile(path, symbolicatedRoot string) error {
 	app := nestedMap(root, "app")
 	platform := nestedMap(root, "platform")
 	row := indexRow{
-		PayloadID:    stringValue(root["payload_id"]),
-		Kind:         stringValue(root["kind"]),
-		CapturedAt:   stringValue(root["captured_at"]),
-		PeriodStart:  stringValue(root["period_start"]),
-		PeriodEnd:    stringValue(root["period_end"]),
-		AppVersion:   stringValue(app["version"]),
-		AppBuild:     stringValue(app["build"]),
-		Distribution: stringValue(app["distribution"]),
-		OSVersion:    stringValue(platform["os_version"]),
-		DeviceClass:  stringValue(platform["device_class"]),
-		Architecture: stringValue(platform["architecture"]),
-		SourcePath:   path,
-		SizeBytes:    int64(len(data)),
+		BundleID:             stringValue(app["bundle_id"]),
+		CapturedBuild:        stringValue(app["build"]),
+		BuildSource:          "envelope_fallback",
+		DistributionEvidence: "envelope_only",
+		PayloadID:            stringValue(root["payload_id"]),
+		Kind:                 stringValue(root["kind"]),
+		CapturedAt:           stringValue(root["captured_at"]),
+		PeriodStart:          stringValue(root["period_start"]),
+		PeriodEnd:            stringValue(root["period_end"]),
+		AppVersion:           stringValue(app["version"]),
+		AppBuild:             stringValue(app["build"]),
+		Distribution:         stringValue(app["distribution"]),
+		OSVersion:            stringValue(platform["os_version"]),
+		DeviceClass:          stringValue(platform["device_class"]),
+		Architecture:         stringValue(platform["architecture"]),
+		SourcePath:           path,
+		SizeBytes:            int64(len(data)),
 	}
+	row.PayloadClass = payloadClass(row.Kind, payload)
+	row = reportMetadata(row, payload)
 	a.indexRows = append(a.indexRows, row)
 	if row.Kind == "metric" {
 		a.metricCount++
+		a.sampleRows = append(a.sampleRows, row)
 	} else if row.Kind == "diagnostic" {
 		a.diagnosticCount++
+		if row.PayloadClass == "source_omitted" {
+			a.sampleRows = append(a.sampleRows, row)
+		}
 	}
 
 	binaryInfo := collectBinaryInfo(payload)
@@ -226,6 +239,7 @@ func (a *analyzer) symbolicateFrames(
 ) {
 	switch typed := value.(type) {
 	case map[string]any:
+		row = reportMetadata(row, typed)
 		uuid := normalizeUUID(stringValue(typed["binaryUUID"]))
 		offset, hasOffset := uintValue(typed["offsetIntoBinaryTextSegment"])
 		address, hasAddress := uintValue(typed["address"])
@@ -245,6 +259,7 @@ func (a *analyzer) symbolicateFrames(
 			if result.Symbol != "" {
 				typed["symbolicated"] = result.Symbol
 				typed["dSYMPath"] = result.DSYMPath
+				typed["dSYMArchitecture"] = result.Architecture
 				a.symbolicated++
 			} else {
 				a.recordMissing(uuid, binaryName, row.Architecture, result.Status)
@@ -268,11 +283,16 @@ func (a *analyzer) collectHistograms(
 ) {
 	switch typed := value.(type) {
 	case map[string]any:
+		row = reportMetadata(row, typed)
 		currentSignpost := signpost
 		if name := stringValue(typed["signpostName"]); name != "" {
 			currentSignpost = typed
 		}
-		if buckets, ok := histogramBuckets(typed["histogram"]); ok {
+		bucketValue, exists := typed["histogramValue"]
+		if !exists {
+			bucketValue = typed["histogram"]
+		}
+		if buckets, ok := histogramBuckets(bucketValue); ok {
 			metricPath := normalizeMetricPath(path)
 			if currentSignpost != nil {
 				category := stringValue(currentSignpost["signpostCategory"])
@@ -332,29 +352,45 @@ func (a *analyzer) collectDiagnostics(payload map[string]any, row indexRow) {
 		items, _ := payload[key].([]any)
 		for _, item := range items {
 			diagnostic, _ := item.(map[string]any)
-			duration, unit := findDuration(diagnostic)
-			a.diagnosticRows = append(a.diagnosticRows, diagnosticRow{
-				PayloadID:     row.PayloadID,
-				AppVersion:    row.AppVersion,
-				AppBuild:      row.AppBuild,
-				Distribution:  row.Distribution,
-				OSVersion:     row.OSVersion,
-				DeviceClass:   row.DeviceClass,
-				Type:          key,
-				DurationValue: duration,
-				DurationUnit:  unit,
-				TopFrame:      firstUsefulFrame(diagnostic),
-			})
-			a.diagnosticStacks = append(a.diagnosticStacks, diagnosticStackRow{
-				PayloadID:    row.PayloadID,
-				AppBuild:     row.AppBuild,
-				Distribution: row.Distribution,
-				OSVersion:    row.OSVersion,
-				DeviceClass:  row.DeviceClass,
-				Type:         key,
-				Frames:       collectUsefulFrames(diagnostic),
-			})
+			eventRow := reportMetadata(row, diagnostic)
+			a.collectDiagnosticEvent(key, diagnostic, eventRow)
 		}
+	}
+}
+
+func (a *analyzer) collectDiagnosticEvent(key string, diagnostic map[string]any, row indexRow) {
+	a.sampleRows = append(a.sampleRows, row)
+	duration, unit := findDuration(diagnostic)
+	a.diagnosticRows = append(a.diagnosticRows, diagnosticRow{
+		BundleID:             row.BundleID,
+		PayloadClass:         row.PayloadClass,
+		BuildSource:          row.BuildSource,
+		CapturedBuild:        row.CapturedBuild,
+		DistributionEvidence: row.DistributionEvidence,
+		PayloadID:            row.PayloadID,
+		AppVersion:           row.AppVersion,
+		AppBuild:             row.AppBuild,
+		Distribution:         row.Distribution,
+		OSVersion:            row.OSVersion,
+		DeviceClass:          row.DeviceClass,
+		Type:                 key,
+		DurationValue:        duration,
+		DurationUnit:         unit,
+		TopFrame:             attributedTopFrame(diagnostic),
+	})
+	for index, stack := range diagnosticCallStacks(diagnostic) {
+		a.diagnosticStacks = append(a.diagnosticStacks, diagnosticStackRow{
+			BundleID:     row.BundleID,
+			ThreadIndex:  index,
+			Attribution:  stackAttribution(stack),
+			PayloadID:    row.PayloadID,
+			AppBuild:     row.AppBuild,
+			Distribution: row.Distribution,
+			OSVersion:    row.OSVersion,
+			DeviceClass:  row.DeviceClass,
+			Type:         key,
+			Frames:       collectUsefulFrames(stack),
+		})
 	}
 }
 
@@ -459,27 +495,48 @@ func normalizeMetricPath(path string) string {
 
 func collectUsefulFrames(value any) []string {
 	result := make([]string, 0)
-	var walk func(any)
-	walk = func(current any) {
+	var walk func(any, int)
+	walk = func(current any, depth int) {
 		switch typed := current.(type) {
 		case map[string]any:
+			if explicitDepth, ok := integerCount(typed["depth"]); ok && explicitDepth >= 0 {
+				depth = int(explicitDepth)
+			}
+			frame := ""
 			if symbol := stringValue(typed["symbolicated"]); symbol != "" {
-				result = append(result, symbol)
+				frame = symbol
 			} else if binaryName := stringValue(typed["binaryName"]); binaryName != "" {
 				if offset, ok := uintValue(typed["offsetIntoBinaryTextSegment"]); ok {
-					result = append(result, fmt.Sprintf("%s + 0x%x", binaryName, offset))
+					frame = fmt.Sprintf("%s + 0x%x", binaryName, offset)
 				}
 			}
+			if frame != "" {
+				annotation := fmt.Sprintf("depth=%d", depth)
+				if count, ok := integerCount(typed["sampleCount"]); ok {
+					annotation += fmt.Sprintf(" samples=%d", count)
+				}
+				if id, ok := integerCount(typed["frameID"]); ok {
+					annotation += fmt.Sprintf(" frame=%d", id)
+				}
+				if parent, ok := integerCount(typed["parentFrameID"]); ok {
+					annotation += fmt.Sprintf(" parent=%d", parent)
+				}
+				result = append(result, annotation+" | "+frame)
+			}
 			for _, key := range sortedMapKeys(typed) {
-				walk(typed[key])
+				childDepth := depth
+				if key == "subFrames" {
+					childDepth++
+				}
+				walk(typed[key], childDepth)
 			}
 		case []any:
 			for _, child := range typed {
-				walk(child)
+				walk(child, depth)
 			}
 		}
 	}
-	walk(value)
+	walk(value, 0)
 	return result
 }
 

@@ -9,6 +9,10 @@ import (
 // 新系统字段仍会保留在原始 JSON，并进入 unknown-fields.csv 提醒更新分析器。
 var recognizedPayloadFields = map[string]struct{}{
 	"_etos":                               {},
+	"metaData":                            {},
+	"appVersion":                          {},
+	"diskSpaceUsageMetrics":               {},
+	"applicationResponsivenessMetrics":    {},
 	"animationMetrics":                    {},
 	"appLaunchDiagnostics":                {},
 	"applicationExitMetrics":              {},
@@ -51,7 +55,7 @@ func (a *analyzer) collectUnknownTopLevelFields(payload map[string]any, row inde
 
 func (a *analyzer) finalizeSampleGroups() []sampleGroupRow {
 	grouped := make(map[sampleGroupKey]*sampleGroupRow)
-	for _, row := range a.indexRows {
+	for _, row := range a.sampleRows {
 		date := "unknown"
 		if len(row.CapturedAt) >= 10 {
 			date = row.CapturedAt[:10]
@@ -99,6 +103,7 @@ func (a *analyzer) finalizeUnknownFields() []unknownFieldRow {
 
 func sampleGroupSortKey(row sampleGroupRow) string {
 	return strings.Join([]string{
+		row.BundleID, row.PayloadClass, row.DistributionEvidence,
 		row.Date,
 		row.AppVersion,
 		row.AppBuild,
@@ -110,6 +115,7 @@ func sampleGroupSortKey(row sampleGroupRow) string {
 
 func unknownFieldSortKey(row unknownFieldRow) string {
 	return strings.Join([]string{
+		row.BundleID, row.PayloadClass, row.DistributionEvidence,
 		row.AppVersion,
 		row.AppBuild,
 		row.Distribution,

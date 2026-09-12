@@ -53,10 +53,10 @@ let metricPayload: [String: Any] = [
         [
             "signpostCategory": "Network",
             "signpostName": "ModelRequestStreaming",
-            "totalCount": 4,
+            "totalSignpostCount": 4,
             "signpostIntervalData": [
-                "histogrammedSignpostDuration": [
-                    "histogram": [
+                "histogrammedSignpostDurations": [
+                    "histogramValue": [
                         ["bucketStart": "0 ms", "bucketEnd": "10 ms", "bucketCount": 1],
                         ["bucketStart": "10 ms", "bucketEnd": "20 ms", "bucketCount": 2],
                         ["bucketStart": "20 ms", "bucketEnd": "30 ms", "bucketCount": 1]

@@ -20,8 +20,16 @@ type parsedBucket struct {
 }
 
 func histogramBuckets(value any) ([]parsedBucket, bool) {
-	items, ok := value.([]any)
-	if !ok || len(items) == 0 {
+	var items []any
+	switch typed := value.(type) {
+	case []any:
+		items = typed
+	case map[string]any:
+		for _, key := range sortedMapKeys(typed) {
+			items = append(items, typed[key])
+		}
+	}
+	if len(items) == 0 {
 		return nil, false
 	}
 	result := make([]parsedBucket, 0, len(items))
@@ -35,9 +43,6 @@ func histogramBuckets(value any) ([]parsedBucket, bool) {
 			return nil, false
 		}
 		upper, unit, ok := parseMeasurement(bucket["bucketEnd"])
-		if !ok {
-			upper, unit, ok = parseMeasurement(bucket["bucketStart"])
-		}
 		if !ok {
 			return nil, false
 		}
@@ -55,7 +60,7 @@ func parseMeasurement(value any) (float64, string, bool) {
 			return 0, "", false
 		}
 		number, err := strconv.ParseFloat(matches[1], 64)
-		return number, strings.TrimSpace(matches[2]), err == nil
+		return number, strings.TrimSpace(matches[2]), err == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
 	case map[string]any:
 		number, ok := numberValue(typed["value"])
 		if !ok {
@@ -83,11 +88,17 @@ func normalizeUnit(value float64, rawUnit string) (float64, string) {
 		return value / 1_000, "ms"
 	case "ns", "nanosecond", "nanoseconds":
 		return value / 1_000_000, "ms"
-	case "kb", "kib":
+	case "kb":
+		return value * 1_000, "bytes"
+	case "mb":
+		return value * 1_000_000, "bytes"
+	case "gb":
+		return value * 1_000_000_000, "bytes"
+	case "kib":
 		return value * 1_024, "bytes"
-	case "mb", "mib":
+	case "mib":
 		return value * 1_024 * 1_024, "bytes"
-	case "gb", "gib":
+	case "gib":
 		return value * 1_024 * 1_024 * 1_024, "bytes"
 	case "byte", "bytes", "b":
 		return value, "bytes"
@@ -98,11 +109,17 @@ func normalizeUnit(value float64, rawUnit string) (float64, string) {
 
 func integerCount(value any) (int64, bool) {
 	switch typed := value.(type) {
+	case bool:
+		// 仅计数字段兼容旧客户端的 NSNumber 桥接缺陷，不能全局改写真正的布尔值。
+		if typed {
+			return 1, true
+		}
+		return 0, true
 	case json.Number:
 		number, err := strconv.ParseInt(typed.String(), 10, 64)
 		return number, err == nil
 	case float64:
-		if typed < 0 || typed != math.Trunc(typed) {
+		if typed < 0 || typed >= float64(math.MaxInt64) || math.IsNaN(typed) || typed != math.Trunc(typed) {
 			return 0, false
 		}
 		return int64(typed), true
@@ -135,6 +152,7 @@ func (a *analyzer) finalizeHistograms() []histogramRow {
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		left := strings.Join([]string{
+			rows[i].BundleID, rows[i].PayloadClass, rows[i].DistributionEvidence,
 			rows[i].AppVersion,
 			rows[i].AppBuild,
 			rows[i].Distribution,
@@ -144,6 +162,7 @@ func (a *analyzer) finalizeHistograms() []histogramRow {
 			rows[i].Unit,
 		}, "|")
 		right := strings.Join([]string{
+			rows[j].BundleID, rows[j].PayloadClass, rows[j].DistributionEvidence,
 			rows[j].AppVersion,
 			rows[j].AppBuild,
 			rows[j].Distribution,

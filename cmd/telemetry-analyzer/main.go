@@ -61,7 +61,8 @@ func run(args []string) error {
 
 输出包含 raw-index.csv、sample-groups.csv、histograms.csv、measurements.csv、
 signposts.csv、diagnostics.csv、diagnostic-stacks.md、unknown-fields.csv、
-parse-errors.csv、missing-symbols.csv、summary.md 和逐文件 symbolicated/ JSON。`)
+parse-errors.csv、missing-symbols.csv、measurement-outliers.csv、summary.md 和逐文件 symbolicated/ JSON。
+各聚合表按 Bundle、报告类别和渠道证据分开；版本优先采用 MetricKit 内部元数据。`)
 	}
 	if err := flags.Parse(args); err != nil {
 		return err

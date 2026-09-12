@@ -62,6 +62,10 @@ func (c *symbolCatalog) Symbolicate(
 
 	uuid = normalizeUUID(uuid)
 	cacheKey := fmt.Sprintf("%s|%s|%x|%x", uuid, architecture, address, offset)
+	if offset > 0 {
+		// UUID 与相对偏移相同即为同一代码位置，ASLR 不应使跨报告缓存失效。
+		cacheKey = fmt.Sprintf("%s|%s|offset:%x", uuid, architecture, offset)
+	}
 	if cached, exists := c.cache[cacheKey]; exists {
 		return cached
 	}
@@ -113,9 +117,10 @@ func (c *symbolCatalog) Symbolicate(
 		return result
 	}
 	result := symbolicationResult{
-		Symbol:   symbol,
-		Status:   "symbolicated",
-		DSYMPath: symbolFile.DSYMPath,
+		Symbol:       symbol,
+		Status:       "symbolicated",
+		DSYMPath:     symbolFile.DSYMPath,
+		Architecture: symbolFile.Architecture,
 	}
 	c.cache[cacheKey] = result
 	return result
