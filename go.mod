@@ -2,6 +2,8 @@ module els-feedback-proxy
 
 go 1.22
 
+toolchain go1.26.10
+
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/redis/go-redis/v9 v9.18.0
